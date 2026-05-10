@@ -12,6 +12,13 @@ A zero-dependency, single-file PHP + SQLite work scheduling application for smal
 - Bi-lingual UI (Estonian / English), PWA support
 - Single-file deployment via `compile.php`
 
+#### Screenshots
+
+[img_admin_audits.jpeg](img_admin_audits.jpeg)  
+[img_admin_month.jpeg](img_admin_month.jpeg)  
+[img_team_objects.jpeg](img_team_objects.jpeg)  
+[img_workers_month.jpeg](img_workers_month.jpeg)
+
 ## Quick Start
 
 ```bash
