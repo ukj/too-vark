@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8"><title>Audit Plugin JS Tests</title>
+	<style>
+		body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 20px; line-height:1.5; }
+		.pass { color: #4CAF50; } .fail { color: #F44336; font-weight: bold; }
+		.group { color: #569CD6; font-weight: bold; margin-top: 20px; }
+		h2 { color: #d7ba7d; font-weight: bold; font-size: 1.2em; border: 1px dashed #d7ba7d; padding: 10px; display: inline-block; }
+		#fixture { display: none; }
+	</style>
+</head>
+<body>
+	<h2>Töö Värk — Audit Plugin JS Test Suite</h2>
+	<div id="out"></div>
+	<div id="fixture"></div>
+
+	<!-- 1. Stubs + core deps -->
+	<script>
+		const CSRF_TOKEN = '';
+		const _origFetch = window.fetch;
+		window.fetch = (url) => (typeof url === 'string' && url.includes('?api='))
+			? Promise.resolve({ json: () => Promise.resolve({}) })
+			: _origFetch.apply(this, arguments);
+		window.alert = (m) => console.warn('Suppressed alert:', m);
+
+		// Stub apiCall's response interceptor queue so we can unit-test
+		// functions that call apiCall(...). Simpler than mocking fetch.
+		window._apiMock = { queue: [], calls: [] };
+	</script>
+	<script src="../src/init.js"></script>
+	<script src="../src/app.js"></script>
+
+	<!--
+		2. Load audit.js with the leading PHP block stripped.
+		   Plugin JS is normally include'd inside a <script> block in index.php,
+		   so PHP tags execute. In the browser we strip them, then inject.
+	-->
+	<script>
+		(async () => {
+			const out = document.getElementById('out');
+			let passed = 0, failed = 0;
+			const log = (m, err=false) => out.innerHTML += `<div class="${err?'fail':'pass'}">${err?'✗ FAIL:':'✓'} ${m}</div>`;
+			const group = (n) => out.innerHTML += `<div class="group">── ${n} ──</div>`;
+			const assertEq = (exp, act, m) => {
+				if (exp === act) { passed++; log(m); }
+				else { failed++; log(`${m} (Expected: ${JSON.stringify(exp)}, Got: ${JSON.stringify(act)})`, true); }
+			};
+			const assertTrue = (cond, m) => assertEq(true, !!cond, m);
+
+			// ── PRELOAD: fetch plugins/audit2.js and strip PHP ──
+			group("0. Load audit2.js (PHP block stripped)");
+			let src;
+			try {
+				const res = await _origFetch('../plugins/audit2.js');
+				src = await res.text();
+			} catch (e) {
+				log('Could not fetch plugins/audit2.js — serve this file over HTTP', true);
+				failed++;
+				return;
+			}
+			// Strip the leading <?php ... ?> block. Plugin emits an
+			// Object.assign(i18n, {...}) line that we simulate manually below.
+			src = src.replace(/^<\?php[\s\S]*?\?>\s*/, '');
+			// Safety check: no stray PHP tags remain
+			assertTrue(!/<\?php|\?>/.test(src), "audit2.js: no PHP tags after strip");
+
+			// Simulate what the server-side PHP block would have emitted:
+			// merge plugin i18n keys into the global i18n object init.js set up.
+			Object.assign(i18n, {
+				aud_saved_locally: 'Saved locally',
+				aud_commit: 'Commit audit',
+				aud_draft: 'Draft',
+				aud_issues: 'Issues',
+				aud_comment: 'Comment',
+				aud_back: '‹ Back',
+				aud_active: 'Active',
+				aud_disabled: 'Disabled',
+				aud_new_template: 'New template',
+				aud_title: 'Title',
+				aud_target: 'Target task',
+				aud_target_any: '— any —',
+				aud_interval: 'Interval',
+				aud_int_task_done: 'On task completion',
+				aud_int_week_end: 'Weekly',
+				aud_int_month_end: 'Monthly',
+				aud_subtasks: 'Checklist items',
+				aud_add_subtask: '+ item',
+				aud_save: 'Save template',
+				aud_delete: 'Disable',
+				aud_runs: 'Runs',
+				aud_no_runs: 'No audits yet.',
+				aud_no_templates: 'No templates yet.',
+				aud_no_access: 'No audit access.',
+				aud_access_title: 'Audit access',
+				aud_access: 'Access',
+				aud_templates: 'Templates',
+			});
+
+			// Inject into page as a real <script> so the functions land on window.
+			const tag = document.createElement('script');
+			tag.textContent = src;
+			document.head.appendChild(tag);
+
+			// Sanity — top-level functions and state must now be reachable
+			assertTrue(typeof _audLsKey === 'function', "audit2.js loaded: _audLsKey defined");
+			assertTrue(typeof _audLoadDraft === 'function', "audit2.js loaded: _audLoadDraft defined");
+			assertTrue(typeof _audSaveDraft === 'function', "audit2.js loaded: _audSaveDraft defined");
+			assertTrue(typeof _audClearDraft === 'function', "audit2.js loaded: _audClearDraft defined");
+			assertTrue(typeof _audShow === 'function', "audit2.js loaded: _audShow defined");
+			assertTrue(typeof _audTemplateFormHtml === 'function', "audit2.js loaded: _audTemplateFormHtml defined");
+			assertTrue(typeof _audSubRowHtml === 'function', "audit2.js loaded: _audSubRowHtml defined");
+			assertTrue(typeof _audPersistDraft === 'function', "audit2.js loaded: _audPersistDraft defined");
+			assertTrue(typeof refreshAuditAccess === 'function', "audit2.js loaded: refreshAuditAccess defined");
+			assertTrue(typeof window.auditOnTaskDone === 'function', "audit2.js loaded: auditOnTaskDone exposed on window");
+
+			// Bail early if core load failed — everything after depends on it
+			if (typeof _audLsKey !== 'function') {
+				log('Cannot continue — audit2.js did not load', true);
+				return;
+			}
+
+
+			// ── 1. i18n merge ──
+			group("1. i18n merge (simulated PHP emit)");
+			assertEq('Saved locally', __('aud_saved_locally'), "plugin keys resolve via __()");
+			assertEq('Commit audit', __('aud_commit'), "plugin key 'aud_commit' resolves");
+			// Unknown keys still fall back to the key name (init.js behavior)
+			assertEq('aud_nonexistent', __('aud_nonexistent'), "unknown plugin key falls back to key name");
+
+
+			// ── 2. localStorage draft lifecycle ──
+			group("2. localStorage draft lifecycle");
+			{
+				// Clean slate
+				localStorage.removeItem(_audLsKey(42));
+				assertEq('audit_draft_42', _audLsKey(42), "_audLsKey: hierarchical key format");
+
+				// Load from empty → null
+				assertEq(null, _audLoadDraft(42), "_audLoadDraft: missing key → null");
+
+				// Save + load round-trip
+				const state = [{done:1, comment:'ok'}, {done:0, comment:'nope'}];
+				_audSaveDraft(42, state);
+				const loaded = _audLoadDraft(42);
+				assertTrue(Array.isArray(loaded), "_audLoadDraft: returns array");
+				assertEq(2, loaded.length, "_audLoadDraft: length preserved");
+				assertEq(1, loaded[0].done, "_audLoadDraft: item 0 done preserved");
+				assertEq('nope', loaded[1].comment, "_audLoadDraft: item 1 comment preserved");
+
+				// Raw storage format is {results, ts}
+				const raw = JSON.parse(localStorage.getItem(_audLsKey(42)));
+				assertTrue(Array.isArray(raw.results), "_audSaveDraft: raw has results[]");
+				assertTrue(typeof raw.ts === 'number', "_audSaveDraft: raw has numeric ts");
+
+				// Overwrite (save again)
+				_audSaveDraft(42, [{done:1, comment:'updated'}]);
+				assertEq('updated', _audLoadDraft(42)[0].comment, "_audSaveDraft: overwrites existing draft");
+
+				// Clear
+				_audClearDraft(42);
+				assertEq(null, _audLoadDraft(42), "_audClearDraft: removes key");
+
+				// Malformed value → load returns null, not throw
+				localStorage.setItem(_audLsKey(99), 'not-json{{{');
+				assertEq(null, _audLoadDraft(99), "_audLoadDraft: malformed JSON → null");
+				localStorage.removeItem(_audLsKey(99));
+
+				// Wrong shape → load returns null
+				localStorage.setItem(_audLsKey(99), JSON.stringify({notResults: 1}));
+				assertEq(null, _audLoadDraft(99), "_audLoadDraft: missing results[] → null");
+				localStorage.removeItem(_audLsKey(99));
+
+				// Isolation between run_ids
+				_audSaveDraft(1, [{done:1, comment:'a'}]);
+				_audSaveDraft(2, [{done:0, comment:'b'}]);
+				assertEq('a', _audLoadDraft(1)[0].comment, "drafts isolated by run_id (1)");
+				assertEq('b', _audLoadDraft(2)[0].comment, "drafts isolated by run_id (2)");
+				_audClearDraft(1); _audClearDraft(2);
+			}
+
+
+			// ── 3. _audShow — panel switching ──
+			group("3. _audShow — panel/tab switching");
+			{
+				const fx = document.getElementById('fixture');
+				fx.innerHTML = `
+					<div id="audit-toolbar">
+						<a href="#" data-aud-tab="runs" class="active">Runs</a>
+						<a href="#" data-aud-tab="templates">Templates</a>
+						<a href="#" data-aud-tab="report">Report</a>
+						<a href="#" data-aud-tab="access">Access</a>
+					</div>
+					<section id="audit-panel-runs"></section>
+					<section id="audit-panel-templates" class="hidden"></section>
+					<section id="audit-panel-report" class="hidden"></section>
+					<section id="audit-panel-access" class="hidden"></section>
+					<section id="audit-panel-run" class="hidden"></section>
+				`;
+
+				_audShow('audit-panel-templates');
+				assertEq(true, $('audit-panel-runs').classList.contains('hidden'), "show(templates): runs hidden");
+				assertEq(false, $('audit-panel-templates').classList.contains('hidden'), "show(templates): templates visible");
+				assertEq(true, $('audit-panel-report').classList.contains('hidden'), "show(templates): report hidden");
+				assertEq(true, $('audit-panel-access').classList.contains('hidden'), "show(templates): access hidden");
+				assertEq(true, $('audit-panel-run').classList.contains('hidden'), "show(templates): run hidden");
+
+				// Tab active class moves with the panel
+				const active = fx.querySelector('#audit-toolbar a.active');
+				assertEq('templates', active.dataset.audTab, "show(templates): tab pill marked active");
+
+				_audShow('audit-panel-run');
+				assertEq(false, $('audit-panel-run').classList.contains('hidden'), "show(run): detail visible");
+				// No tab matches panel 'run' → all tabs deactivate
+				const anyActive = fx.querySelectorAll('#audit-toolbar a.active').length;
+				assertEq(0, anyActive, "show(run): no tab pill active (detail overlay)");
+
+				fx.innerHTML = '';
+			}
+
+
+			// ── 4. _audSubRowHtml — HTML shape + escaping ──
+			group("4. _audSubRowHtml — XSS escape + structure");
+			{
+				// Normal input
+				const html = _audSubRowHtml('Check floor', 0);
+				assertTrue(html.includes('class="aud-sub-row"'), "_audSubRowHtml: has row wrapper class");
+				assertTrue(html.includes('data-aud-sub-up'), "_audSubRowHtml: has up-arrow button");
+				assertTrue(html.includes('data-aud-sub-dn'), "_audSubRowHtml: has down-arrow button");
+				assertTrue(html.includes('data-aud-sub-del'), "_audSubRowHtml: has delete button");
+				assertTrue(html.includes('value="Check floor"'), "_audSubRowHtml: value set correctly");
+
+				// XSS payload → must be escaped. Build the payload from split parts so
+				// the browser's HTML parser doesn't see a literal closing-script sequence
+				// mid-string (which would terminate this script block early).
+				const xssPayload = '<' + 'script>alert(1)<' + '/script>';
+				const xss = _audSubRowHtml(xssPayload, 0);
+				assertTrue(!xss.includes('<' + 'script>'), "_audSubRowHtml: <script> escaped");
+				assertTrue(xss.includes('&lt;script&gt;'), "_audSubRowHtml: < and > escaped");
+
+				// Empty name → empty value attribute, still renders
+				const empty = _audSubRowHtml('', 0);
+				assertTrue(empty.includes('value=""'), "_audSubRowHtml: empty name → value=''");
+
+				// Quote injection in name — verify no actual attribute break
+				const quoted = _audSubRowHtml('a"onfocus=alert(1)"b', 0);
+				assertTrue(!/"\s+onfocus=/.test(quoted), "_audSubRowHtml: no attribute break injection");
+				assertTrue(quoted.includes('&quot;'), "_audSubRowHtml: \" → &quot;");
+				assertTrue(quoted.includes('value="a&quot;onfocus=alert(1)&quot;b"'), "_audSubRowHtml: payload as escaped attr value");
+			}
+
+
+			// ── 5. _audTemplateFormHtml — new vs edit + defaults ──
+			group("5. _audTemplateFormHtml — new vs edit forms");
+			{
+				// New (no template arg) → blank id, default interval, no delete button
+				const newForm = _audTemplateFormHtml(null);
+				assertTrue(newForm.includes('data-aud-tpl=""'), "new form: empty id attribute");
+				assertTrue(newForm.includes('New template'), "new form: header text");
+				assertTrue(!newForm.includes('data-aud-del='), "new form: no delete button");
+				assertTrue(newForm.includes('<option value="week_end" selected>'), "new form: default interval = week_end");
+				assertTrue(newForm.includes('checked'), "new form: active checkbox checked by default");
+
+				// Edit form — existing template
+				const t = { id: 5, title: 'Daily', target: 'Cleaning', interval: 'task_done', subtasks: ['A','B'], active: 0 };
+				const edit = _audTemplateFormHtml(t);
+				assertTrue(edit.includes('data-aud-tpl="5"'), "edit form: id attribute set");
+				assertTrue(edit.includes('value="Daily"'), "edit form: title prefilled");
+				assertTrue(edit.includes('value="Cleaning"'), "edit form: target prefilled");
+				assertTrue(edit.includes('<option value="task_done" selected>'), "edit form: interval selected");
+				assertTrue(edit.includes('data-aud-del="5"'), "edit form: delete button present");
+				// Inactive → checkbox not checked
+				assertTrue(!/active"[^>]*checked/.test(edit), "edit form: inactive → checkbox NOT checked");
+				// Subtasks rendered — count rows
+				const subRows = (edit.match(/aud-sub-row/g) || []).length;
+				assertEq(2, subRows, "edit form: 2 subtask rows");
+
+				// XSS in title gets escaped
+				const bad = { id: 1, title: '<img src=x onerror=alert(1)>', target: '', interval: 'week_end', subtasks: [], active: 1 };
+				const badHtml = _audTemplateFormHtml(bad);
+				assertTrue(!badHtml.includes('<img src=x'), "edit form: XSS in title escaped");
+				assertTrue(badHtml.includes('&lt;img'), "edit form: < in title → &lt;");
+			}
+
+
+			// ── 6. _audPersistDraft — reads DOM, writes localStorage ──
+			group("6. _audPersistDraft — reads DOM, persists state");
+			{
+				localStorage.removeItem(_audLsKey(77));
+				const fx = document.getElementById('fixture');
+				fx.innerHTML = `
+					<section id="audit-panel-run">
+						<div class="aud-item">
+							<label><input type="checkbox" data-aud-idx="0" checked></label>
+							<textarea data-aud-cmt="0">first comment</textarea>
+						</div>
+						<div class="aud-item">
+							<label><input type="checkbox" data-aud-idx="1"></label>
+							<textarea data-aud-cmt="1">second comment</textarea>
+						</div>
+						<p id="aud-draft-msg" class="hint"></p>
+					</section>
+				`;
+				const panel = $('audit-panel-run');
+				const state = [{done:0, comment:''}, {done:0, comment:''}];
+
+				_audPersistDraft(77, state, panel);
+
+				// In-memory state mutated
+				assertEq(1, state[0].done, "_audPersistDraft: reads checkbox 0 (checked)");
+				assertEq(0, state[1].done, "_audPersistDraft: reads checkbox 1 (unchecked)");
+				assertEq('first comment', state[0].comment, "_audPersistDraft: reads comment 0");
+				assertEq('second comment', state[1].comment, "_audPersistDraft: reads comment 1");
+
+				// Persisted to localStorage
+				const saved = _audLoadDraft(77);
+				assertEq(2, saved.length, "_audPersistDraft: persisted to localStorage");
+				assertEq(1, saved[0].done, "_audPersistDraft: storage[0].done=1");
+				assertEq('second comment', saved[1].comment, "_audPersistDraft: storage[1].comment");
+
+				// "Saved locally" feedback shown
+				const msg = $('aud-draft-msg').textContent;
+				assertTrue(msg.includes('Saved locally'), "_audPersistDraft: status message rendered");
+
+				_audClearDraft(77);
+				fx.innerHTML = '';
+			}
+
+
+			// ── 7. Access tab HTML ──
+			group("7. Access tab — checkbox rows");
+			{
+				const fx = document.getElementById('fixture');
+				fx.innerHTML = '<section id="audit-panel-access"></section>';
+
+				const users = [
+					{ id: 2, username: 'mari', real_name: 'Mari Mets', has_access: 1 },
+					{ id: 3, username: 'juri', real_name: '',          has_access: 0 },
+				];
+				const rows = users.map(u =>
+					'<tr><td>' + escHtml(u.real_name || u.username) + '</td>' +
+					'<td><input type="checkbox" data-uid="' + u.id + '"' + (u.has_access ? ' checked' : '') + '></td></tr>'
+				).join('');
+				$('audit-panel-access').innerHTML =
+					'<div class="card"><div class="card_header"><b>' + escHtml(__('aud_access_title')) + '</b></div>' +
+					'<table role="presentation" class="card_body card_body--p10">' + rows + '</table></div>';
+
+				const boxes = document.querySelectorAll('[data-uid]');
+				assertEq(2, boxes.length, "access tab: one checkbox per user");
+				assertEq(true,  boxes[0].checked,     "access tab: user with access → checked");
+				assertEq(false, boxes[1].checked,     "access tab: user without access → unchecked");
+				assertEq('2',   boxes[0].dataset.uid, "access tab: data-uid on first row");
+				assertTrue($('audit-panel-access').innerHTML.includes('Mari Mets'), "access tab: real_name used when present");
+				assertTrue($('audit-panel-access').innerHTML.includes('juri'),      "access tab: username fallback when real_name empty");
+
+				fx.innerHTML = '';
+			}
+
+
+			// ── Results ──
+			group("Summary");
+			out.innerHTML += `<br><hr><div style="font-weight:bold; color: ${failed ? '#F44336' : '#4CAF50'}">
+				Tests: ${passed+failed} | Passed: ${passed} | Failed: ${failed}
+			</div>`;
+		})();
+	</script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Style Guide — Töö Värk</title>
+<link rel="stylesheet" href="./src/style.css?q=5">
+<style>
+body { max-width: 900px; background: #f5f5f5; padding: 16px; }
+
+.sg-section { margin: 24px 0 8px; padding: 4px 0; border-bottom: 2px solid #333; }
+.sg-section h2 { margin: 0; font-size: 1.1rem; }
+.sg-label { font-size: 0.75rem; color: #555; }
+.sg-val { font-size: 0.7rem; color: #888; }
+
+.sg-compare { border-collapse: collapse; font-size: 0.75rem; }
+.sg-compare td, .sg-compare th { border: 1px solid #ccc; padding: 3px 8px; text-align: center; }
+.sg-compare th { background: #ddd; }
+.sg-compare .sg-bar { background: #333; height: 8px; display: inline-block; vertical-align: middle; }
+
+.sg-lines { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; padding: 8px 0; }
+.sg-line-box { text-align: center; }
+.sg-line { width: 120px; background: #333; }
+
+.sg-space-grid { display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 0; }
+.sg-space-item { text-align: center; min-width: 90px; }
+.sg-margin-box { display: inline-block; border: 1px solid #e74c3c; background: rgba(231,76,60,0.08); }
+.sg-padding-box { border: 1px dashed #3498db; background: rgba(52,152,219,0.08); }
+.sg-content-box { background: #fff; font-size: 0.65rem; color: #333; white-space: nowrap; text-align: center; line-height: 1; padding: 2px; }
+
+.sg-legend { display: flex; gap: 16px; font-size: 0.7rem; padding: 4px 0 8px; }
+
+.sg-font-row { display: flex; align-items: baseline; gap: 16px; padding: 4px 0; border-bottom: 1px dashed #ccc; }
+.sg-font-label { min-width: 100px; font-size: 0.7rem; color: #555; }
+
+.sg-colors { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.sg-swatch { width: 90px; text-align: center; border-radius: 3px; padding: 8px 4px 4px; font-size: 0.65rem; border: 1px solid rgba(0,0,0,0.1); }
+.sg-swatch-dark { color: #fff; }
+
+.sg-btn-grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; align-items: center; }
+.sg-status-row { display: flex; gap: 24px; align-items: center; padding: 6px 0; }
+.sg-status-text { font-weight: 700; min-width: 100px; }
+
+.sg-radii { display: flex; gap: 16px; padding: 8px 0; }
+.sg-radius-box { width: 60px; height: 40px; background: #bdc3c7; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; border: 1px solid #999; }
+
+/* ── Width research ── */
+.sg-research { border: 2px solid #569CD6; margin: 8px 0; padding: 8px; background: #f8f8f8; }
+.sg-research h3 { margin: 0 0 4px; font-size: 0.85rem; color: #569CD6; }
+.ruler { height: 2px; background: repeating-linear-gradient(90deg, #e74c3c 0, #e74c3c 1px, transparent 1px, transparent 10%); margin: 4px 0; }
+.ruler-labels { display: flex; justify-content: space-between; font-size: 0.55rem; color: #999; }
+
+/* ── Proposed overrides (toggle) ── */
+
+</style>
+</head>
+<body>
+
+<h1 style="font-size:1.2rem; margin:0 0 4px;">Töö Värk — CSS Style Guide</h1>
+<p class="sg-label">Auto-generated from :root variables. All boxes use actual CSS var values.</p>
+
+<div id="guide"></div>
+
+<script>
+const guide = document.getElementById('guide');
+const CS = getComputedStyle(document.documentElement);
+
+// ── Helpers ──
+
+function getVars(prefix) {
+	const vars = [];
+	for (const sheet of document.styleSheets) {
+		try { for (const rule of sheet.cssRules) {
+			if (rule.selectorText === ':root') for (const prop of rule.style) {
+				if (prop.startsWith('--' + prefix))
+					vars.push([prop, CS.getPropertyValue(prop).trim()]);
+			}
+		}} catch(e) {}
+	}
+	return vars;
+}
+
+function pxValue(val) {
+	const el = document.createElement('div');
+	el.style.cssText = 'position:absolute;visibility:hidden;width:' + val;
+	document.body.appendChild(el);
+	const w = el.offsetWidth;
+	el.remove();
+	return w;
+}
+
+function addSection(title) {
+	const s = document.createElement('div');
+	s.className = 'sg-section';
+	s.innerHTML = '<h2>' + title + '</h2>';
+	guide.appendChild(s);
+}
+
+function addHTML(html) {
+	const d = document.createElement('div');
+	d.innerHTML = html;
+	guide.appendChild(d);
+}
+
+function isDark(hex) {
+	if (!hex.startsWith('#')) return false;
+	const c = hex.replace('#','');
+	return (parseInt(c.substr(0,2),16)*0.299 + parseInt(c.substr(2,2),16)*0.587 + parseInt(c.substr(4,2),16)*0.114) < 140;
+}
+
+/** Extract unique color names from --btn-{name}-bg vars. */
+function btnColorNames() {
+	return getVars('btn-').reduce((names, [prop]) => {
+		const m = prop.match(/^--btn-(\w+)-bg$/);
+		if (m && !names.includes(m[1])) names.push(m[1]);
+		return names;
+	}, []);
+}
+
+/** Extract status indices from .status-N color rules in stylesheets. */
+function statusIndices() {
+	const indices = [];
+	for (const sheet of document.styleSheets) {
+		try { for (const rule of sheet.cssRules) {
+			const m = (rule.selectorText || '').match(/^\.status-(\d+)$/);
+			if (m) indices.push(parseInt(m[1]));
+		}} catch(e) {}
+	}
+	return [...new Set(indices)].sort();
+}
+
+
+
+// 1. SPACING SCALE
+
+addSection('1. Spacing Scale (sp-*)');
+addHTML('<p class="sg-label">Unified scale for borders, gaps, margins, paddings. Sorted by computed size.</p>');
+
+const spVars = getVars('sp-');
+const spEntries = spVars.map(([p, v]) => ({ name: p.replace('--',''), raw: v, px: pxValue(v) }));
+spEntries.sort((a, b) => a.px - b.px);
+
+let tbl = '<table class="sg-compare"><tr><th>Var</th><th>Value</th><th>→ px</th><th>Visual</th><th>Δ</th></tr>';
+let prevPx = 0;
+for (const e of spEntries) {
+	const delta = e.px - prevPx;
+	const dup = (delta === 0 && prevPx > 0) ? ' style="background:#fce4ec"' : '';
+	tbl += '<tr' + dup + '><td>' + e.name + '</td><td>' + e.raw + '</td><td>' + e.px.toFixed(1) + '</td>' +
+		'<td><span class="sg-bar" style="width:' + Math.max(e.px, 1) + 'px"></span></td>' +
+		'<td>' + (prevPx ? delta.toFixed(1) : '—') + '</td></tr>';
+	prevPx = e.px;
+}
+tbl += '</table>';
+addHTML(tbl);
+
+
+// 2. AS BORDER LINES
+addSection('2. As Border Lines');
+
+let linesHTML = '<div class="sg-lines">';
+for (const e of spEntries) {
+	linesHTML += '<div class="sg-line-box">' +
+		'<div class="sg-line" style="height:' + e.raw + '"></div>' +
+		'<div class="sg-label">' + e.name + '</div>' +
+		'<div class="sg-val">' + e.raw + ' → ' + e.px + 'px</div></div>';
+}
+linesHTML += '</div>';
+addHTML(linesHTML);
+
+
+// 3. MARGIN / PADDING BOX DIAGRAMS
+addSection('3. Margin + Padding Boxes');
+addHTML('<div class="sg-legend">' +
+	'<span style="color:#e74c3c;font-weight:700">━ solid red = margin</span>' +
+	'<span style="color:#3498db;font-weight:700">┅ dashed blue = padding</span>' +
+	'<span>□ white = content</span></div>');
+
+let boxHTML = '<div class="sg-space-grid">';
+for (const e of spEntries) {
+	const v = 'var(--' + e.name + ')';
+	boxHTML += '<div class="sg-space-item">' +
+		'<div class="sg-margin-box" style="padding:' + v + ';">' +
+			'<div class="sg-padding-box" style="padding:' + v + ';">' +
+				'<div class="sg-content-box">txt</div></div></div>' +
+		'<div class="sg-label">' + e.name + '</div>' +
+		'<div class="sg-val">' + e.raw + ' → ' + e.px.toFixed(1) + 'px</div></div>';
+}
+boxHTML += '</div>';
+addHTML(boxHTML);
+
+
+// 4. BORDER × SPACING MATRIX
+addSection('4. Border × Spacing Matrix');
+addHTML('<p class="sg-label">Each spacing var as border-width (columns ≤ 4px) × padding (rows).</p>');
+
+const borderEntries = spEntries.filter(e => e.px <= 4);
+let mxHTML = '<table class="sg-compare"><tr><th>pad \\ border</th>';
+for (const b of borderEntries) mxHTML += '<th>' + b.name + ' (' + b.raw + ')</th>';
+mxHTML += '</tr>';
+for (const sp of spEntries) {
+	mxHTML += '<tr><td>' + sp.name + ' (' + sp.raw + ')</td>';
+	for (const b of borderEntries) {
+		mxHTML += '<td><div style="border:var(--' + b.name + ') solid #333;padding:var(--' + sp.name + ');display:inline-block;line-height:1;">' +
+			'<span style="font-size:0.6rem;">Aa</span></div></td>';
+	}
+	mxHTML += '</tr>';
+}
+mxHTML += '</table>';
+addHTML(mxHTML);
+
+
+// 5. BORDER RADIUS
+addSection('5. Border Radius');
+const radVars = getVars('rad');
+if (radVars.length) {
+	let radHTML = '<div class="sg-radii">';
+	for (const [prop, val] of radVars) {
+		radHTML += '<div class="sg-radius-box" style="border-radius:' + val + '">' +
+			prop.replace('--','') + '<br>' + val + '</div>';
+	}
+	radHTML += '</div>';
+	addHTML(radHTML);
+} else {
+	const rv = CS.getPropertyValue('--radius').trim();
+	if (rv) addHTML('<div class="sg-radii"><div class="sg-radius-box" style="border-radius:' + rv + '">radius<br>' + rv + '</div></div>');
+}
+
+
+// 6. FONT SIZES
+addSection('6. Font Sizes (fs-*)');
+const fsVars = getVars('fs-');
+const fsEntries = fsVars.map(([p, v]) => ({ name: p.replace('--',''), raw: v, px: pxValue(v) }));
+fsEntries.sort((a, b) => a.px - b.px);
+
+let fsHTML = '';
+for (const e of fsEntries) {
+	fsHTML += '<div class="sg-font-row">' +
+		'<span class="sg-font-label">' + e.name + '<br><span class="sg-val">' + e.raw + ' → ' + e.px.toFixed(1) + 'px</span></span>' +
+		'<span style="font-size:var(--' + e.name + ')">Koristus 08:00–16:00</span></div>';
+}
+addHTML(fsHTML);
+
+
+// 7. COLORS
+addSection('7. Colors');
+for (const pfx of ['c-', 'btn-']) {
+	const vars = getVars(pfx);
+	if (!vars.length) continue;
+	let cHTML = '<p class="sg-label">' + pfx + '* vars</p><div class="sg-colors">';
+	for (const [prop, val] of vars) {
+		const resolved = CS.getPropertyValue(prop).trim();
+		if (!resolved.match(/^#|^rgb/)) continue;
+		cHTML += '<div class="sg-swatch' + (isDark(resolved) ? ' sg-swatch-dark' : '') + '" style="background:' + resolved + '">' +
+			prop.replace('--','') + '<br>' + val + '</div>';
+	}
+	cHTML += '</div>';
+	addHTML(cHTML);
+}
+
+
+// 8. BUTTONS (auto-discovered from --btn-*-bg)
+addSection('8. Buttons');
+addHTML('<p class="sg-label">Derived from --btn-{name}-bg vars. Modifiers appended.</p>');
+
+const colors = btnColorNames();
+let btnHTML = '<div class="sg-btn-grid">';
+for (const c of colors) btnHTML += '<button class="btn-sm btn-' + c + '">.btn-' + c + '</button>';
+btnHTML += '<button class="btn-sm btn-' + (colors.includes('green') ? 'green' : colors[0]) + ' btn-inactive">inactive</button>';
+btnHTML += '<button class="btn-sm btn-' + (colors.includes('red') ? 'red' : colors[0]) + ' btn-del-done">del-done</button>';
+btnHTML += '<button class="btn-sm btn-' + (colors.includes('silver') ? 'silver' : colors[0]) + ' btn-compact">compact</button>';
+btnHTML += '</div>';
+
+btnHTML += '<p class="sg-label" style="margin-top:8px">.save_ta (primary action):</p><div class="sg-btn-grid">';
+btnHTML += '<button class="save_ta">save_ta</button>';
+for (const c of colors) btnHTML += '<button class="save_ta btn-' + c + '">save_ta .btn-' + c + '</button>';
+btnHTML += '</div>';
+addHTML(btnHTML);
+
+
+// 9. STATUS (auto-discovered from .status-N rules)
+addSection('9. Status Classes');
+addHTML('<p class="sg-label">Auto-detected .status-N classes. Text color vs button vs select border.</p>');
+
+const statuses = statusIndices();
+const btnColors = ['red', 'orange', 'green']; // progression mapping
+
+let stHTML = '';
+for (const n of statuses) {
+	const bc = btnColors[n] || btnColors[btnColors.length - 1];
+	stHTML += '<div class="sg-status-row">' +
+		'<span class="sg-label" style="min-width:20px">' + n + '</span>' +
+		'<span class="sg-status-text status-' + n + '">status-' + n + '</span>' +
+		'<button class="btn-sm btn-' + bc + '">.btn-' + bc + '</button>' +
+		'<select name="status" class="status-' + n + '" style="width:80px"><option>' + n + '</option></select></div>';
+}
+addHTML(stHTML);
+
+
+// 10. CARDS
+addSection('10. Cards');
+
+addHTML(
+	'<div class="card"><div class="card_header">card (default)</div><div class="card_body">card_body</div></div>' +
+	'<div class="card card-rules"><div class="card_header card_header--flex"><span>card-rules + --flex</span>' +
+		'<button class="btn-sm btn-silver btn-compact">+ Add</button></div>' +
+		'<div class="card_body card_body--no-pad">card_body--no-pad</div></div>' +
+	'<div class="card card-secondary"><div class="card_header">card-secondary</div>' +
+		'<div class="card_body card_body--p10">card_body--p10</div></div>'
+);
+
+
+// 11. WIDTH RESEARCH — real elements
+addSection('11. Width Research — Live Elements');
+
+addHTML('<div class="ruler"></div><div class="ruler-labels"><span>0</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>');
+
+addHTML('<div id="width-demo">' +
+
+	'<div class="sg-research"><h3>Compact inputs (time, date, status)</h3>' +
+	'<input type="time" value="08:00"> <input type="time" value="16:00"><br>' +
+	'<input type="date" value="2025-03-28"><br>' +
+	'<select name="status" class="status-1"><option value="0">Ootel</option><option value="1" selected>Töös</option><option value="2">Tehtud</option></select></div>' +
+
+	'<div class="sg-research"><h3>Task form (html_task_fields layout)</h3>' +
+	'<label><input type="text" name="title" placeholder="Koristus / Task title" required></label>' +
+	'<table><tr><td><label>🚦S:<select name="status" class="status-0"><option>Ootel</option><option>Töös</option><option>Tehtud</option></select></label></td>' +
+	'<td><label>🗓️Kp:<input type="date" name="task_date" value="2025-03-28" required></label></td></tr>' +
+	'<tr><td><label>⌚A:<input type="time" name="start_time" value="08:00"></label></td>' +
+	'<td><label>L:<input type="time" name="end_time" value="16:00"></label></td></tr></table>' +
+	'<br><textarea name="notes" placeholder="Notes..." style="height:3rem;"></textarea></div>' +
+
+	'<div class="sg-research"><h3>Buttons</h3>' +
+	'<p class="sg-label">.save_ta (primary):</p>' +
+	'<button class="save_ta">Save & Generate</button>' +
+	'<button class="save_ta btn-blue">Save Rules</button>' +
+	'<p class="sg-label">.btn-sm (inline):</p>' +
+	'<button class="btn-sm btn-green">Save</button> ' +
+	'<button class="btn-sm btn-silver">Clear</button> ' +
+	'<button class="btn-sm btn-silver">⬇️ CSV</button> ' +
+	'<a class="btn-sm btn-silver" href="#">🖨 Print</a></div>' +
+
+	'<div class="sg-research"><h3>Sub-nav</h3>' +
+	'<div class="sub-nav"><a href="#" class="active">Today</a><a href="#">Month</a><a href="#">Objects</a><a href="#">Management</a></div></div>' +
+
+	'<div class="sg-research"><h3>Worker selects</h3>' +
+	'<label>Single: <select name="user_id"><option value="">—Select worker—</option><option>mari</option><option>jüri</option><option>peeter</option></select></label><br>' +
+	'<label>Multi: <select name="worker_ids" multiple size="3"><option>mari</option><option>jüri</option><option>peeter</option></select></label></div>' +
+
+	'<div class="sg-research"><h3>Text inputs + textarea</h3>' +
+	'<input type="text" placeholder="Location title"><br>' +
+	'<input type="text" placeholder="Address"><br>' +
+	'<textarea placeholder="Description" style="height:3rem;"></textarea></div>' +
+
+	'<div class="sg-research"><h3>Visual rule row</h3>' +
+	'<div class="visual-rule-row">' +
+	'<input type="text" class="vr-input-title" placeholder="Task title">' +
+	'<div class="vr-days" style="display:inline-flex;"><label><input type="checkbox" value="1" checked>E</label><label><input type="checkbox" value="2">T</label><label><input type="checkbox" value="3" checked>K</label></div>' +
+	'<input type="time" class="vr-input-time" value="08:00"> <input type="time" class="vr-input-time" value="16:00"></div></div>' +
+
+	'<div class="sg-research"><h3>Login form</h3>' +
+	'<div class="card"><label>Username<br><input type="text" name="username" required></label><br>' +
+	'<label>Password<br><input type="password" name="password" required></label><br>' +
+	'<button type="button" class="save_ta">Enter</button></div></div>' +
+
+'</div>');
+
+
+// ═══════════════════════════════════════════
+// 12. COMPUTED WIDTHS
+// ═══════════════════════════════════════════
+addSection('12. Computed Widths');
+addHTML('<div id="measurements" class="sg-label"></div>');
+
+
+// ── Width toggle + measurement ──
+
+function toggleProposed(on) {
+	document.getElementById('width-demo').classList.toggle('proposed', on);
+	document.getElementById('btn-current').classList.toggle('btn-inactive', on);
+	document.getElementById('btn-proposed').classList.toggle('btn-inactive', !on);
+	measureWidths();
+}
+
+function measureWidths() {
+	const container = document.getElementById('width-demo');
+	if (!container) return;
+	const cW = container.offsetWidth;
+	const out = document.getElementById('measurements');
+
+	const targets = [
+		['input[type="time"]', 'Time input'],
+		['input[type="date"]', 'Date input'],
+		['select[name="status"]', 'Status select'],
+		['input[type="text"]', 'Text input'],
+		['textarea[name="notes"]', 'Notes textarea'],
+		['.save_ta', 'Primary button'],
+		['.btn-sm', 'Inline button'],
+		['.sub-nav a', 'Sub-nav item'],
+		['select[name="user_id"]', 'Worker select'],
+		['.vr-input-title', 'VR title input'],
+		['.vr-input-time', 'VR time input'],
+	];
+
+	let html = '<table style="width:100%;font-size:0.7rem;border-collapse:collapse;">';
+	html += '<tr style="background:#ddd;"><th>Element</th><th>px</th><th>%</th><th>rem</th><th>Visual</th></tr>';
+
+	for (const [sel, label] of targets) {
+		const el = container.querySelector(sel);
+		if (!el) continue;
+		const w = el.offsetWidth;
+		const pct = (w / cW * 100).toFixed(1);
+		const barW = Math.min(w / cW * 100, 100);
+		const cat = pct > 80 ? '#2ecc71' : pct > 40 ? '#f39c12' : '#3498db';
+		html += '<tr style="border-bottom:1px solid #eee;">' +
+			'<td>' + label + '</td><td>' + w + '</td><td>' + pct + '%</td><td>' + (w / 16).toFixed(1) + '</td>' +
+			'<td><div style="background:' + cat + ';height:6px;width:' + barW + '%;border-radius:2px;"></div></td></tr>';
+	}
+	html += '</table>';
+	html += '<p style="margin:4px 0 0;">Green=full · Orange=half · Blue=compact. Container: ' + cW + 'px</p>';
+	out.innerHTML = html;
+}
+
+setTimeout(measureWidths, 100);
+</script>
+</body>
+</html>

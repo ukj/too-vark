@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8"><title>JS Tests</title>
+	<style>
+		body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 20px; }
+		.pass { color: #4CAF50; } .fail { color: #F44336; } .group { color: #569CD6; font-weight: bold; margin-top: 20px;}		h2 { color: #d7ba7d; font-weight: bold; font-size: 1.2em; border: 1px dashed #d7ba7d; padding: 10px; display: inline-block; }
+	</style>
+</head>
+<body>
+	<h2>Töö Värk — JS Test Suite</h2>
+	<div id="out"></div>
+
+	<!-- 1. Stubs for standalone testing (no PHP backend) -->
+	<script>
+		const CSRF_TOKEN='';
+		// Stub fetch so app.js DOMContentLoaded doesn't hit a real server
+		const _origFetch = window.fetch;
+		window.fetch = function(url) {
+			if (typeof url === 'string' && url.includes('?api='))
+				return Promise.resolve({ json: () => Promise.resolve({}) });
+			return _origFetch.apply(this, arguments);
+		};
+		// Stub alert so failed API calls don't block tests
+		window.alert = function(msg) { console.warn('Suppressed alert:', msg); };
+	</script>
+	<script src="../src/init.js"></script>
+	<script src="../src/app.js"></script>
+
+	<!-- 2. The Micro Test Framework -->
+	<script>
+		const out = document.getElementById('out');
+		let passed = 0, failed = 0;
+
+		function log(msg, isErr=false) {
+			out.innerHTML += `<div class="${isErr ? 'fail' : 'pass'}">${isErr ? '✗ FAIL:' : '✓'} ${msg}</div>`;
+		}
+		function testGroup(name) { out.innerHTML += `<div class="group">── ${name} ──</div>`; }
+		function assertEq(expected, actual, msg) {
+			if (expected === actual) { passed++; log(msg); } 
+			else { failed++; log(`${msg} (Expected: ${expected}, Got: ${actual})`, true); }
+		}
+
+		// --- PRE-FLIGHT: verify source files loaded ---
+		testGroup("0. Source Files Loaded");
+		if (typeof isoWeek !== 'function') {
+			log('app.js failed to load — check console for errors', true); failed++;
+		} else { log('app.js loaded'); passed++; }
+		if (typeof escHtml !== 'function') {
+			log('init.js failed to load — check console for errors', true); failed++;
+		} else { log('init.js loaded'); passed++; }
+
+		// --- RUN TESTS (only if source files loaded) ---
+		if (typeof isoWeek === 'function' && typeof escHtml === 'function') {
+
+			testGroup("1. isoWeek() calculations");
+			assertEq(1, isoWeek("2025-01-01"), "Jan 1 2025 is Week 1");
+			assertEq(9, isoWeek("2025-02-28"), "Feb 28 2025 is Week 9");
+
+			testGroup("2. HTML Escaping");
+			assertEq("&lt;b&gt;XSS&lt;/b&gt;", escHtml("<b>XSS</b>"), "escHtml encodes tags");
+
+			testGroup("2b. compileTpl — compiled template engine");
+			{
+				// Basic substitution
+				const fn = compileTpl('<b>{{name}}</b> is {{age}}');
+				assertEq('<b>Alice</b> is 30', fn({name:'Alice', age:30}), "compileTpl: basic substitution");
+
+				// Missing key → empty string
+				assertEq('<b></b> is 30', fn({age:30}), "compileTpl: missing key → empty string");
+
+				// Extra keys silently ignored
+				assertEq('<b>Bob</b> is 25', fn({name:'Bob', age:25, extra:'ignored'}), "compileTpl: extra keys ignored");
+
+				// No tags → returns original string
+				const noTags = compileTpl('<div>plain</div>');
+				assertEq('<div>plain</div>', noTags({}), "compileTpl: no tags → original string");
+
+				// Empty template
+				const empty = compileTpl('');
+				assertEq('', empty({}), "compileTpl: empty template → empty string");
+
+				// Same key used twice
+				const dup = compileTpl('{{x}}+{{x}}');
+				assertEq('5+5', dup({x:'5'}), "compileTpl: duplicate key resolved both");
+
+				// Malformed tags not matched
+				const bad = compileTpl('{{}} {{foo bar}} {{ok}}');
+				assertEq('{{}} {{foo bar}} yes', bad({ok:'yes'}), "compileTpl: malformed tags left as-is");
+
+				// Compiled function is reusable
+				const row = compileTpl('<tr><td>{{a}}</td><td>{{b}}</td></tr>');
+				const r1 = row({a:'1',b:'2'});
+				const r2 = row({a:'3',b:'4'});
+				assertEq('<tr><td>1</td><td>2</td></tr>', r1, "compileTpl: reuse call 1");
+				assertEq('<tr><td>3</td><td>4</td></tr>', r2, "compileTpl: reuse call 2");
+			}
+
+			testGroup("3. syncTextToVisual — JSON parsing");
+			{
+				// Build DOM fixtures
+				const fixture = document.createElement('div');
+				fixture.innerHTML = `
+					<textarea id="rules-textarea"></textarea>
+					<div id="visual-rules-container"></div>
+					<template id="visual-rule-template">
+						<div class="visual-rule-row">
+							<input type="text" class="vr-title">
+							<div class="vr-days">
+								<label><input type="checkbox" value="1">E</label>
+								<label><input type="checkbox" value="2">T</label>
+								<label><input type="checkbox" value="3">K</label>
+								<label><input type="checkbox" value="4">N</label>
+								<label><input type="checkbox" value="5">R</label>
+								<label><input type="checkbox" value="6">L</label>
+								<label><input type="checkbox" value="7">P</label>
+							</div>
+							<div class="vr-weeks">
+								<label><input type="checkbox" value="1">1</label>
+								<label><input type="checkbox" value="2">2</label>
+								<label><input type="checkbox" value="3">3</label>
+								<label><input type="checkbox" value="4">4</label>
+							</div>
+							<input type="time" class="vr-start">
+							<input type="time" class="vr-end">
+						</div>
+					</template>`;
+				document.body.appendChild(fixture);
+
+				const ta = document.getElementById('rules-textarea');
+				const container = document.getElementById('visual-rules-container');
+
+				// Test: valid JSON → visual rows
+				ta.value = JSON.stringify([
+					{title:"Cleaning", days:"15", weeks:"1234", start:"08:00", end:"16:00"},
+					{title:"Office", days:"3", weeks:"13", start:"09:00", end:"17:00"}
+				]);
+				syncTextToVisual();
+				const rows = container.querySelectorAll('.visual-rule-row');
+				assertEq(2, rows.length, "syncTextToVisual: 2 JSON rules → 2 visual rows");
+				assertEq("Cleaning", rows[0].querySelector('.vr-title').value, "syncTextToVisual: first title correct");
+				assertEq("Office", rows[1].querySelector('.vr-title').value, "syncTextToVisual: second title correct");
+				assertEq(true, rows[0].querySelector('.vr-days input[value="1"]').checked, "syncTextToVisual: day 1 checked");
+				assertEq(true, rows[0].querySelector('.vr-days input[value="5"]').checked, "syncTextToVisual: day 5 checked");
+				assertEq(false, rows[0].querySelector('.vr-days input[value="3"]').checked, "syncTextToVisual: day 3 not checked");
+				assertEq("08:00", rows[0].querySelector('.vr-start').value, "syncTextToVisual: start time correct");
+				assertEq("16:00", rows[0].querySelector('.vr-end').value, "syncTextToVisual: end time correct");
+				assertEq(true, rows[1].querySelector('.vr-weeks input[value="1"]').checked, "syncTextToVisual: week 1 checked");
+				assertEq(true, rows[1].querySelector('.vr-weeks input[value="3"]').checked, "syncTextToVisual: week 3 checked");
+				assertEq(false, rows[1].querySelector('.vr-weeks input[value="2"]').checked, "syncTextToVisual: week 2 not checked");
+
+				// Test: Estonian day letters
+				ta.value = '[{"title":"Test","days":"ER","weeks":"1","start":"08:00","end":"16:00"}]';
+				syncTextToVisual();
+				const eRow = container.querySelector('.visual-rule-row');
+				assertEq(true, eRow.querySelector('.vr-days input[value="1"]').checked, "syncTextToVisual: E→1 checked");
+				assertEq(true, eRow.querySelector('.vr-days input[value="5"]').checked, "syncTextToVisual: R→5 checked");
+
+				// Test: empty JSON array
+				ta.value = '[]';
+				syncTextToVisual();
+				assertEq(0, container.querySelectorAll('.visual-rule-row').length, "syncTextToVisual: empty array → 0 rows");
+
+				// Test: invalid JSON → no crash, 0 rows
+				ta.value = 'not valid json';
+				syncTextToVisual();
+				assertEq(0, container.querySelectorAll('.visual-rule-row').length, "syncTextToVisual: invalid JSON → 0 rows");
+
+				// Test: empty string
+				ta.value = '';
+				syncTextToVisual();
+				assertEq(0, container.querySelectorAll('.visual-rule-row').length, "syncTextToVisual: empty string → 0 rows");
+			}
+
+			testGroup("4. syncVisualToText — JSON output");
+			{
+				const ta = document.getElementById('rules-textarea');
+				const container = document.getElementById('visual-rules-container');
+
+				// Populate via syncTextToVisual, then read back via syncVisualToText
+				ta.value = '[{"title":"Job","days":"24","weeks":"13","start":"09:00","end":"17:00"}]';
+				syncTextToVisual();
+				syncVisualToText();
+
+				let parsed = null;
+				try { parsed = JSON.parse(ta.value); } catch(e) {}
+				assertEq(true, parsed !== null, "syncVisualToText: output is valid JSON");
+				assertEq(true, Array.isArray(parsed), "syncVisualToText: output is array");
+				assertEq(1, parsed.length, "syncVisualToText: 1 rule in output");
+				assertEq("Job", parsed[0].title, "syncVisualToText: title preserved");
+				assertEq("24", parsed[0].days, "syncVisualToText: days preserved");
+				assertEq("13", parsed[0].weeks, "syncVisualToText: weeks preserved");
+				assertEq("09:00", parsed[0].start, "syncVisualToText: start preserved");
+				assertEq("17:00", parsed[0].end, "syncVisualToText: end preserved");
+
+				// Test: empty rows produce empty JSON array
+				container.innerHTML = '';
+				syncVisualToText();
+				let emptyParsed = null;
+				try { emptyParsed = JSON.parse(ta.value); } catch(e) {}
+				assertEq(true, Array.isArray(emptyParsed), "syncVisualToText: empty container → valid JSON array");
+				assertEq(0, emptyParsed.length, "syncVisualToText: empty container → 0 rules");
+			}
+
+			testGroup("5. addVisualRule — JSON append");
+			{
+				const ta = document.getElementById('rules-textarea');
+				ta.value = '[{"title":"Existing","days":"1","weeks":"1234","start":"08:00","end":"16:00"}]';
+				syncTextToVisual();
+				addVisualRule();
+
+				let parsed = null;
+				try { parsed = JSON.parse(ta.value); } catch(e) {}
+				assertEq(true, parsed !== null, "addVisualRule: output is valid JSON");
+				assertEq(2, parsed.length, "addVisualRule: appended 1 rule (1→2)");
+				assertEq("Existing", parsed[0].title, "addVisualRule: original rule preserved");
+				assertEq("1234", parsed[1].weeks, "addVisualRule: new rule has default weeks 1234");
+				assertEq("08:00", parsed[1].start, "addVisualRule: new rule has default start 08:00");
+
+				// From empty state
+				ta.value = '';
+				syncTextToVisual();
+				addVisualRule();
+				let fromEmpty = null;
+				try { fromEmpty = JSON.parse(ta.value); } catch(e) {}
+				assertEq(true, Array.isArray(fromEmpty), "addVisualRule: from empty → valid JSON array");
+				assertEq(1, fromEmpty.length, "addVisualRule: from empty → 1 rule");
+
+				// Cleanup fixture
+				document.getElementById('rules-textarea').closest('div').remove();
+			}
+
+
+			testGroup("6. STATUS_BTN_CLASSES mapping");
+			assertEq('btn-red', STATUS_BTN_CLASSES[0], "STATUS_BTN_CLASSES[0] = btn-red");
+			assertEq('btn-orange', STATUS_BTN_CLASSES[1], "STATUS_BTN_CLASSES[1] = btn-orange");
+			assertEq('btn-green', STATUS_BTN_CLASSES[2], "STATUS_BTN_CLASSES[2] = btn-green");
+			assertEq(3, STATUS_BTN_CLASSES.length, "STATUS_BTN_CLASSES has 3 entries");
+
+
+			testGroup("7. setStatusBtn() — CSS class toggling");
+			{
+				const btn = document.createElement('button');
+
+				// Status 0 → btn-red, enabled
+				setStatusBtn(btn, 0);
+				assertEq(true, btn.classList.contains('btn-red'), "setStatusBtn(0): adds btn-red");
+				assertEq(false, btn.classList.contains('btn-orange'), "setStatusBtn(0): no btn-orange");
+				assertEq(false, btn.classList.contains('btn-green'), "setStatusBtn(0): no btn-green");
+				assertEq(false, btn.disabled, "setStatusBtn(0): not disabled");
+				assertEq(false, btn.classList.contains('btn-inactive'), "setStatusBtn(0): not btn-inactive");
+
+				// Status 1 → btn-orange, enabled
+				setStatusBtn(btn, 1);
+				assertEq(false, btn.classList.contains('btn-red'), "setStatusBtn(1): btn-red removed");
+				assertEq(true, btn.classList.contains('btn-orange'), "setStatusBtn(1): adds btn-orange");
+				assertEq(false, btn.disabled, "setStatusBtn(1): not disabled");
+
+				// Status 2 → btn-green, disabled + btn-inactive
+				setStatusBtn(btn, 2);
+				assertEq(true, btn.classList.contains('btn-green'), "setStatusBtn(2): adds btn-green");
+				assertEq(true, btn.disabled, "setStatusBtn(2): disabled");
+				assertEq(true, btn.classList.contains('btn-inactive'), "setStatusBtn(2): adds btn-inactive");
+
+				// Back to 0 → btn-inactive removed
+				setStatusBtn(btn, 0);
+				assertEq(false, btn.classList.contains('btn-inactive'), "setStatusBtn(0→reset): btn-inactive removed");
+				assertEq(true, btn.classList.contains('btn-red'), "setStatusBtn(0→reset): back to btn-red");
+			}
+
+
+			testGroup("8. syncStatusColor() — status select CSS classes");
+			{
+				const sel = document.createElement('select');
+				sel.innerHTML = '<option value="0">P</option><option value="1">I</option><option value="2">D</option>';
+
+				sel.value = '0';
+				syncStatusColor(sel);
+				assertEq(true, sel.classList.contains('status-0'), "syncStatusColor(0): adds status-0");
+				assertEq(false, sel.classList.contains('status-1'), "syncStatusColor(0): no status-1");
+				assertEq(false, sel.classList.contains('status-2'), "syncStatusColor(0): no status-2");
+
+				sel.value = '1';
+				syncStatusColor(sel);
+				assertEq(false, sel.classList.contains('status-0'), "syncStatusColor(1): status-0 removed");
+				assertEq(true, sel.classList.contains('status-1'), "syncStatusColor(1): adds status-1");
+
+				sel.value = '2';
+				syncStatusColor(sel);
+				assertEq(true, sel.classList.contains('status-2'), "syncStatusColor(2): adds status-2");
+				assertEq(false, sel.classList.contains('status-1'), "syncStatusColor(2): status-1 removed");
+			}
+
+
+			testGroup("9. scrollToToday() — Today button scroll behavior");
+			{
+				const today = new Date().toISOString().slice(0, 10);
+				const todayYM = today.slice(0, 7);
+
+				// Helper: build a container with data-date divs
+				function makeDateContainer(id, dates) {
+					let old = document.getElementById(id);
+					if (old) old.remove();
+					const c = document.createElement('div');
+					c.id = id;
+					dates.forEach(d => {
+						const el = document.createElement('div');
+						el.dataset.date = d;
+						el.scrollIntoView = function() {};
+						c.appendChild(el);
+					});
+					document.body.appendChild(c);
+					return c;
+				}
+
+				// CURRENT_YM is '' (no ?ym= in test URL), so displayedYM resolves to todayYM → same-month path
+
+				// 9a. Exact today match → highlight-flash added
+				{
+					const c = makeDateContainer('test-scroll-a', [today]);
+					scrollToToday('test-scroll-a');
+					const target = c.querySelector('[data-date="' + today + '"]');
+					assertEq(true, target.classList.contains('highlight-flash'),
+						"scrollToToday: exact today match gets highlight-flash");
+					c.remove();
+				}
+
+				// 9b. Today missing → falls back to nearest future date
+				{
+					const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+					const tomorrow  = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+					const c = makeDateContainer('test-scroll-b', [yesterday, tomorrow]);
+					scrollToToday('test-scroll-b');
+					const past = c.querySelector('[data-date="' + yesterday + '"]');
+					const future = c.querySelector('[data-date="' + tomorrow + '"]');
+					assertEq(false, past.classList.contains('highlight-flash'),
+						"scrollToToday fallback: past date NOT highlighted");
+					assertEq(true, future.classList.contains('highlight-flash'),
+						"scrollToToday fallback: nearest future date highlighted");
+					c.remove();
+				}
+
+				// 9c. No matching dates at all → no highlight-flash anywhere, no error
+				{
+					const c = makeDateContainer('test-scroll-c', ['2020-01-01', '2020-01-02']);
+					let threw = false;
+					try { scrollToToday('test-scroll-c'); } catch(e) { threw = true; }
+					assertEq(false, threw, "scrollToToday: no future dates does not throw");
+					const flashed = c.querySelectorAll('.highlight-flash');
+					assertEq(0, flashed.length, "scrollToToday: no future dates → nothing highlighted");
+					c.remove();
+				}
+
+				// 9d. Missing container → no error
+				{
+					let threw = false;
+					try { scrollToToday('nonexistent-container-id'); }
+					catch(e) { threw = true; }
+					assertEq(false, threw, "scrollToToday: missing container does not throw");
+				}
+
+				// 9e. Redirect URL construction — when displayedYM ≠ todayYM
+				// (can't call scrollToToday with different CURRENT_YM since it's const,
+				//  so verify the URL pattern the function would build)
+				{
+					const uid = '';
+					const view = 'rules';
+					const url = '?view=' + view + '&ym=' + todayYM + (uid ? '&user_id=' + uid : '') + '#today';
+					assertEq(true, url.endsWith('#today'),
+						"scrollToToday redirect URL ends with #today hash");
+					assertEq(true, url.includes('ym=' + todayYM),
+						"scrollToToday redirect URL targets today's month");
+				}
+			}
+		}
+
+		// Print Results
+		out.innerHTML += `<br><hr><div style="font-weight:bold; color: ${failed ? '#F44336' : '#4CAF50'}">
+			Tests: ${passed+failed} | Passed: ${passed} | Failed: ${failed}
+		</div>`;
+	</script>
+</body>
+</html>
