@@ -1,4 +1,4 @@
-# Töö Värk — Lightweight Work Scheduler
+# ![icon-128.png](icon-128.png) Töö Värk — Lightweight Work Scheduler
 
 A zero-dependency, single-file PHP + SQLite work scheduling application for small teams. Define repeating schedules with a visual rule editor, track task progress in real time, manage workers — all from one PHP file and one SQLite database.
 
