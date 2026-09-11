@@ -24,6 +24,10 @@ define('USER1', 'admin');// initial pass: admin
 define('JS_ERR_LOGFILE', DATA_DIR . '/js_errors.log');
 define('TV_TIMERS_LOGFILE', DATA_DIR . '/tv_timers.txt');
 
+
+
+if (($_GET['api'] ?? '') !== 'manifest') {
+
 // 30 days (30×24×3600)
 if (session_status() === PHP_SESSION_NONE) {
 
@@ -31,7 +35,10 @@ if(!str_contains(__DIR__,'/storage/emulated/0/')){
 	if (!is_dir(SESS_DIR)) @mkdir(SESS_DIR, 0700, true);
 	if (is_dir(SESS_DIR) && is_writable(SESS_DIR)) {
 if(!is_file(SESS_DIR.'/index.html'))file_put_contents(SESS_DIR.'/index.html','LOGOFF');
-session_save_path(SESS_DIR);}
+session_save_path(SESS_DIR);
+ini_set('session.gc_probability', '1'); // Force to clean dir
+ini_set('session.gc_divisor', '100');   // 1% chance per request to purge expired
+}
 }
 
 ini_set('session.gc_maxlifetime', '2592000');
@@ -45,9 +52,14 @@ session_set_cookie_params([
 ]);
 session_start();
 }
+
+
 if (empty($_SESSION['csrf_token'])) {
 	$_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
+
+}//if NOT fetching manifest
+
 
 include_once 'src/i18n.php';
 
