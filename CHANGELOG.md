@@ -1,6 +1,13 @@
 # CHANGELOG
 <!-- FORMAT: ## vX.Y.Z — Short Title, then ### Category heading, then prose or - bullet items. Newest version first. -->
 
+## v3.2.1 — Wildcard Week Support in Rule Engine
+
+### Added
+- Wildcard week selector (`*`) in visual rules editor (`#visual-rule-template` in `src/views.php`).
+- Rule engine support for every-week rules (`api_rules_generate` in `src/api_handlers.php`): rules containing `*` in `weeks` now generate tasks for all matching weekdays across the entire month, including partial ISO weeks at month start/end.
+- Mutual exclusivity handling in `src/app.js`: selecting `*` unchecks weeks 1–4; selecting any of 1–4 unchecks `*`; initial sync (`syncTextToVisual`) preserves this state.
+
 ## v3.3.0 — Audit Plugin: Access Control + Hardening
 
 ### Access Control
