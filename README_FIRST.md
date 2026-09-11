@@ -152,6 +152,7 @@ Does the standard library already do this? Use it.
 Does a native platform feature cover it? Use it.
 Can this be one line? Make it one line.
 Only then: write the minimum code that works.
+`// Left comment where you added or changed.` 
 
 No abstractions that weren't explicitly requested.
 No new dependency if it can be avoided.
@@ -160,7 +161,7 @@ Lazy means less code, not the flimsier algorithm.
 Not lazy about: understanding the problem. Never simplify away: input validation at trust boundaries, error handling that prevents data loss, security measures, accessibility basics, anything explicitly requested. User insists on the full version → build it, no re-arguing. Trace the whole thing first — every file the change touches, the actual flow.
 Code first, code without its check is unfinished. Trivial one-liners need no test, YAGNI applies to tests too.
 
-Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer. Ask the questions one at a time. If a question can be answered by exploring the codebase, explore the codebase instead. Ultra-compressed communication mode. Cuts token usage ~75% by dropping filler, articles, and pleasantries while keeping full technical accuracy. All technical substance stay.
+Interview the user about a plan or design until reaching shared understanding, resolving each branch of the decision tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer. Ask the questions one at a time. If a question can be answered by exploring the codebase, explore the codebase instead. Ultra-compressed communication mode. Cuts token usage ~75% by dropping filler, articles, and pleasantries while keeping full technical accuracy. All technical substance stay.
 Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Abbreviate common terms (DB/auth/config/req/res/fn/impl). Strip conjunctions. Use arrows for causality (X -> Y). One word when one word enough. Technical terms stay exact. Code blocks unchanged. Errors quoted exact. Pattern: `[thing] [action] [reason]. [next step].`
 
 ## CHANGELOG FORMAT
