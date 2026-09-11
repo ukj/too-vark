@@ -18,23 +18,21 @@ if (!defined('APP_VERSION')) define('APP_VERSION', 'dev');
 
 define('DATA_DIR', './');
 define('SESS_DIR', __DIR__ . '/sessions');
-define('DB_FILE', DATA_DIR . '/app-demo.sqlite');
-define('ORG_NAME', 'Minu Ettevõtte');
+define('DB_FILE', DATA_DIR . '/app.sqlite');
+define('ORG_NAME', 'Minu Ettevõtte');//TODO: DEFINE OR VARIABLE?
 define('USER1', 'admin');// initial pass: admin
-
 define('JS_ERR_LOGFILE', DATA_DIR . '/js_errors.log');
 define('TV_TIMERS_LOGFILE', DATA_DIR . '/tv_timers.txt');
-
-
 
 // 30 days (30×24×3600)
 if (session_status() === PHP_SESSION_NONE) {
 
 if(!str_contains(__DIR__,'/storage/emulated/0/')){
 	if (!is_dir(SESS_DIR)) @mkdir(SESS_DIR, 0700, true);
-	if (is_dir(SESS_DIR) && is_writable(SESS_DIR)) {session_save_path(SESS_DIR);}
+	if (is_dir(SESS_DIR) && is_writable(SESS_DIR)) {
+if(!is_file(SESS_DIR.'/index.html'))file_put_contents(SESS_DIR.'/index.html','LOGOFF');
+session_save_path(SESS_DIR);}
 }
-
 
 ini_set('session.gc_maxlifetime', '2592000');
 session_name('TooVark_SESS');
@@ -50,9 +48,6 @@ session_start();
 if (empty($_SESSION['csrf_token'])) {
 	$_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
-
-
-
 
 include_once 'src/i18n.php';
 
@@ -108,6 +103,7 @@ include_once 'src/api.php';
 <title><?= htmlspecialchars(ORG_NAME) ?> – <?= __('app_title') ?></title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="?api=manifest">
+<link rel="preconnect" href="<?php echo $_SERVER['SERVER_NAME']; ?>">
 <meta name="theme-color" content="#333333">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
