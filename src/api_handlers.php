@@ -280,13 +280,25 @@ function api_rules_generate(PDO $pdo, array $d, int $target_uid, string $req_ym)
 			$iso_week=(int)date('W', $ts);
 
 			$rel_week=$iso_to_rel[$iso_week] ?? 0;
-			if ($rel_week === 0) continue; // partial week — skip
+// if ($rel_week === 0) continue; // partial week — skip
+$rel_week=$iso_to_rel[$iso_week] ?? 0;
+// Don't skip rel_week===0 early; rules with '*' match every week
 
 			foreach ($rules as $r) {
-				if (empty($r['title']) || empty($r['days']) || empty($r['weeks']) || empty($r['start']) || empty($r['end'])) continue;
+				if (
+empty($r['title']) || 
+empty($r['days']) || 
+empty($r['weeks']) || 
+empty($r['start']) || 
+empty($r['end'])) continue;
 
 				$day_col=strtr($r['days'], ['E'=>'1','T'=>'2','K'=>'3','N'=>'4','R'=>'5','L'=>'6','P'=>'7']);
-				$match=(strpos($day_col, (string)$day_num) !== false) && (strpos((string)$r['weeks'], (string)$rel_week) !== false);
+
+
+				if (!str_contains($day_col, (string)$day_num)) continue; // Weekday mismatch
+
+				$weeks=(string)$r['weeks'];
+				$match=str_contains($weeks, '*') || ($rel_week > 0 && str_contains($weeks, (string)$rel_week)); // Support '*' for all weeks
 				if ($match) $insert_stmt->execute([$target_uid, date('Y-m-d', $ts), $r['title'], $r['start'], $r['end']]);
 			}
 		}
