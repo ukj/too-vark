@@ -380,6 +380,7 @@ if($wdi>0) echo
 	<span class="hint" <?= html_hint(__('rules_full_weeks')) ?> >
 	<?= __('g_week') ?>
 	</span>
+<label><input type="checkbox" value="*">*</label><?php // Support all weeks (including non-ISO) ?>
 	<?php foreach([1,2,3,4] as $w) echo "<label><input type='checkbox' value='$w'>$w</label>"; ?>
 	</div>
 
