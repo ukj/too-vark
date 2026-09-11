@@ -74,14 +74,16 @@ Rules are stored as a JSON array in `user_rules.rules_text`. Each object has fiv
 |-----------|-----------|------------|----------|
 | title | Text (no spaces) | `Cleaning` | Underscores for multi-word titles |
 | days | Digits 1–7 or letters ETKN RLP | `135` or `EKR` | 1=Monday ... 7=Sunday. Estonian letters map: E=1, T=2, K=3, N=4, R=5, L=6, P=7 |
-| weeks | Digits 1–4 concatenated | `1234` | Relative full-week index within month. Only ISO weeks where all 7 days fall within the month are numbered. `1`=first full week, `1234`=all full weeks, `13`=bi-weekly |
+| weeks | Digits 1–4 or `*` | `1234` or `*` | Relative full-week index within month (1–4) or `*` for all weeks. Only ISO weeks where all 7 days fall within the month receive indices 1–4. Using `*` matches all days of the month on the selected weekdays, including partial start/end weeks. |
 | start | HH:MM | `08:00` | 24-hour format |
 | end | HH:MM | `16:00` | 24-hour format |
 
 **Visual Editor Abstraction:** 
-To improve user experience, the raw JSON format is abstracted by a Visual Editor UI. The UI provides checkboxes for Weekdays (1-7) and Weeks (W1-W4), along with native time pickers. JavaScript handles strict two-way synchronization (`syncTextToVisual` and `syncVisualToText`) between the visual DOM nodes and a JSON textarea (used for debugging). The backend `?api=rules/generate` endpoint receives the JSON array string via `rules_txt`, completely decoupled from the visual UI implementation.
+To improve user experience, the raw JSON format is abstracted by a Visual Editor UI. The UI provides checkboxes for Weekdays (1-7) and Weeks (`*` for all weeks, 1-4 for ISO full weeks), along with native time pickers. The `*` checkbox is mutually exclusive with 1–4 in the UI. JavaScript handles strict two-way synchronization (`syncTextToVisual` and `syncVisualToText`) between the visual DOM nodes and a JSON textarea (used for debugging). The backend `?api=rules/generate` endpoint receives the JSON array string via `rules_txt`, completely decoupled from the visual UI implementation.
 
-The engine computes ISO week numbers (`date('W')`) for each day in the target month, counts how many days each ISO week has within the month, and assigns relative indices (1, 2, 3, 4) only to weeks with all 7 days present. Days falling in partial weeks at the start or end of the month are skipped — the manager or worker adds those manually via the schedule editor. ISO week numbers are displayed as separators in the month view to assist rule authoring.
+The engine computes ISO week numbers (`date('W')`) for each day in the target month, counts how many days each ISO week has within the month, and assigns relative indices (1, 2, 3, 4) only to weeks with all 7 days present. Days falling in partial weeks at the start or end of the month receive relative index 0:
+- Rules specifying `weeks: "*"` match any day matching the weekday, regardless of whether it falls in a full or partial week.
+- Rules specifying numeric weeks (e.g. `weeks: "1234"` or `"13"`) require relative index > 0 and only match their designated full ISO weeks.
 
 ### 2.2.2 Multi-Month Generation
 
