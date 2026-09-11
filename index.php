@@ -17,6 +17,7 @@ if (defined('APP_DEBUG') && APP_DEBUG) $time_start = hrtime(true);
 if (!defined('APP_VERSION')) define('APP_VERSION', 'dev');
 
 define('DATA_DIR', './');
+define('SESS_DIR', __DIR__ . '/sessions');
 define('DB_FILE', DATA_DIR . '/app-demo.sqlite');
 define('ORG_NAME', 'Minu Ettevõtte');
 define('USER1', 'admin');// initial pass: admin
@@ -24,17 +25,34 @@ define('USER1', 'admin');// initial pass: admin
 define('JS_ERR_LOGFILE', DATA_DIR . '/js_errors.log');
 define('TV_TIMERS_LOGFILE', DATA_DIR . '/tv_timers.txt');
 
+
+
+// 30 days (30×24×3600)
 if (session_status() === PHP_SESSION_NONE) {
-	ini_set('session.gc_maxlifetime', '2592000');
+
+if(!str_contains(__DIR__,'/storage/emulated/0/')){
+	if (!is_dir(SESS_DIR)) @mkdir(SESS_DIR, 0700, true);
+	if (is_dir(SESS_DIR) && is_writable(SESS_DIR)) {session_save_path(SESS_DIR);}
+}
+
+
+ini_set('session.gc_maxlifetime', '2592000');
+session_name('TooVark_SESS');
 session_set_cookie_params([
-'lifetime' => 2592000,'path' => '/',
+'lifetime' => 2592000,
+'path' => '/',
 'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-'httponly' => true,'samesite' => 'Lax'
-]);session_start();
+'httponly' => true,
+'samesite' => 'Lax'
+]);
+session_start();
 }
 if (empty($_SESSION['csrf_token'])) {
 	$_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
+
+
+
 
 include_once 'src/i18n.php';
 
