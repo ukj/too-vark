@@ -1,14 +1,24 @@
 # CHANGELOG
 <!-- FORMAT: ## vX.Y.Z — Short Title, then ### Category heading, then prose or - bullet items. Newest version first. -->
 
-## v3.2.1 — Wildcard Week Support in Rule Engine
+
+
+
+## v3.2.4 — Fix Location Details Input Lock & Test Runner Helper Bootstrap
+
+### Fixed
+
+* **Location details editor**: `populateDetails()` tühjendas iga klahvivajutusega sisendvälja, kui pealkirja ei leitud vahemälust. Lisatud puuduva vaste enneaegne tagastus (`src/app.js`) ja tühjendusnupp vormile (`src/views.php`).
+* **Test suite & DB boot**: `insert_user()` viidud failist `src/database.php` faili `src/helpers.php`. Muudetud laadimisjärjekorda failis `index.php` (`helpers.php` enne `database.php`), tagades funktsiooni kättesaadavuse `tests/run.php` mälupõhistes testides ja esmasel andmebaasi paigaldusel.
+* 
+## v3.2.3 — Wildcard Week Support in Rule Engine
 
 ### Added
 - Wildcard week selector (`*`) in visual rules editor (`#visual-rule-template` in `src/views.php`).
 - Rule engine support for every-week rules (`api_rules_generate` in `src/api_handlers.php`): rules containing `*` in `weeks` now generate tasks for all matching weekdays across the entire month, including partial ISO weeks at month start/end.
 - Mutual exclusivity handling in `src/app.js`: selecting `*` unchecks weeks 1–4; selecting any of 1–4 unchecks `*`; initial sync (`syncTextToVisual`) preserves this state.
 
-## v3.3.0 — Audit Plugin: Access Control + Hardening
+## v3.2.2 — Audit Plugin: Access Control + Hardening
 
 ### Access Control
 Workers can only access audit views if an admin has granted them a row in the new `audit_access` table. Admin is always allowed. The gate (`_aud_can()`) is checked in `plugin_audit_run`, `plugin_audit_run_create`, and `plugin_audit_due`. A new `plugin_audit_access` handler (GET + POST) lets admin list all users with their `has_access` flag and toggle it with a single checkbox — no page reload. The client-side access tab (`refreshAuditAccess`) renders checkboxes that call `audit_access` on change.
