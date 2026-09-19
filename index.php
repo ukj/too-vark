@@ -10,6 +10,7 @@
  * @requires ext-pdo_sqlite
  */
 declare(strict_types=1);
+ 
 define('APP_DEBUG', false);
 date_default_timezone_set('Europe/Tallinn');
 
@@ -21,7 +22,8 @@ define('SESS_DIR', __DIR__ . '/sessions');
 define('DB_FILE', DATA_DIR . '/app.sqlite');
 define('ORG_NAME', 'Minu Ettevõtte');//TODO: DEFINE OR VARIABLE?
 define('USER1', 'admin');// initial pass: admin
-define('JS_ERR_LOGFILE', DATA_DIR . '/js_errors.log');
+define('JS_ERR_LOGFILE', DATA_DIR . '/tv_js_errors.log');
+define('JS_TIMERS', DATA_DIR . '/tv_js_timers.txt');
 define('TV_TIMERS_LOGFILE', DATA_DIR . '/tv_timers.txt');
 
 
@@ -72,9 +74,9 @@ $lang = $_SESSION['lang'] ?? 'et';
 $langi=$i18ni[$lang];
 function __(string $key): string {global $i18n, $langi; return $i18n[$key][$langi] ?? $key;}
 
-include_once 'src/database.php';
-
 include_once 'src/helpers.php';
+
+include_once 'src/database.php';
 
 include_once 'src/plugins.php';
 
@@ -109,6 +111,7 @@ include_once 'src/api_handlers.php';
 include_once 'src/api.php';
 
 // --- HTML shell: everything below is the static page frame
+header('Content-Type: text/html; charset=utf-8'); 
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head><meta charset="UTF-8">

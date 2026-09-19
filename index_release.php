@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-define('APP_VERSION', 'v3.3.0 — 2026-05-10 13:43');
+define('APP_VERSION', 'v3.2.1 — 2026-09-19 17:15');
 /** DO NOT BEAUTIFI INCLUDE LINES
  *  or use own compiler
  * 
@@ -12,6 +12,7 @@ define('APP_VERSION', 'v3.3.0 — 2026-05-10 13:43');
  * @requires ext-pdo_sqlite
  */
 
+ 
 define('APP_DEBUG', false);
 date_default_timezone_set('Europe/Tallinn');
 
@@ -19,24 +20,50 @@ if (defined('APP_DEBUG') && APP_DEBUG) $time_start = hrtime(true);
 if (!defined('APP_VERSION')) define('APP_VERSION', 'dev');
 
 define('DATA_DIR', './');
-define('DB_FILE', DATA_DIR . '/app-demo.sqlite');
-define('ORG_NAME', 'Minu Ettevõtte');
+define('SESS_DIR', __DIR__ . '/sessions');
+define('DB_FILE', DATA_DIR . '/app.sqlite');
+define('ORG_NAME', 'Minu Ettevõtte');//TODO: DEFINE OR VARIABLE?
 define('USER1', 'admin');// initial pass: admin
-
-define('JS_ERR_LOGFILE', DATA_DIR . '/js_errors.log');
+define('JS_ERR_LOGFILE', DATA_DIR . '/tv_js_errors.log');
+define('JS_TIMERS', DATA_DIR . '/tv_js_timers.txt');
 define('TV_TIMERS_LOGFILE', DATA_DIR . '/tv_timers.txt');
 
+
+
+if (($_GET['api'] ?? '') !== 'manifest') {
+
+// 30 days (30×24×3600)
 if (session_status() === PHP_SESSION_NONE) {
-	ini_set('session.gc_maxlifetime', '2592000');
-session_set_cookie_params([
-'lifetime' => 2592000,'path' => '/',
-'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
-'httponly' => true,'samesite' => 'Lax'
-]);session_start();
+
+if(!str_contains(__DIR__,'/storage/emulated/0/')){
+	if (!is_dir(SESS_DIR)) @mkdir(SESS_DIR, 0700, true);
+	if (is_dir(SESS_DIR) && is_writable(SESS_DIR)) {
+if(!is_file(SESS_DIR.'/index.html'))file_put_contents(SESS_DIR.'/index.html','LOGOFF');
+session_save_path(SESS_DIR);
+ini_set('session.gc_probability', '1'); // Force to clean dir
+ini_set('session.gc_divisor', '100');   // 1% chance per request to purge expired
 }
+}
+
+ini_set('session.gc_maxlifetime', '2592000');
+session_name('TooVark_SESS');
+session_set_cookie_params([
+'lifetime' => 2592000,
+'path' => '/',
+'secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+'httponly' => true,
+'samesite' => 'Lax'
+]);
+session_start();
+}
+
+
 if (empty($_SESSION['csrf_token'])) {
 	$_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
+
+}//if NOT fetching manifest
+
 
 
 
@@ -54,27 +81,6 @@ if (isset($_GET['lang']) && isset($i18ni[$_GET['lang']])) {
 $lang = $_SESSION['lang'] ?? 'et';
 $langi=$i18ni[$lang];
 function __(string $key): string {global $i18n, $langi; return $i18n[$key][$langi] ?? $key;}
-
-
-
-/* included from src/database.php [[[*/
-if (defined('APP_DEBUG') && APP_DEBUG) $time_dbinit = hrtime(true); $pdo = new PDO('sqlite:' . DB_FILE, null, null, [ PDO::ATTR_ERRMODE =>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC, ]); $pdo->exec("
-	PRAGMA foreign_keys = ON;
-	PRAGMA synchronous = NORMAL;
-	PRAGMA temp_store = MEMORY;
-	PRAGMA cache_size = -20000;
-"); if ($pdo->query("PRAGMA journal_mode")->fetchColumn() !== 'wal') { $pdo->exec("PRAGMA journal_mode=WAL;"); }
- 
-function ensure_tasks_table(PDO $pdo): void { $pdo->exec("CREATE TABLE IF NOT EXISTS tasks (
-		id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-		task_date TEXT, title TEXT, start_time TEXT, end_time TEXT, status INTEGER DEFAULT 0, source TEXT NOT NULL DEFAULT 'manual', notes TEXT DEFAULT '',
-		UNIQUE(user_id, task_date, title)
-	)"); $pdo->exec("CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(task_date)"); $pdo->exec("CREATE INDEX IF NOT EXISTS idx_tasks_date_title ON tasks(task_date, title, user_id)"); }
- if ((int)$pdo->query("PRAGMA user_version")->fetchColumn() < 1) { $pdo->exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, real_name TEXT, contact TEXT, force_password_change INTEGER DEFAULT 0)"); $pdo->exec("CREATE TABLE IF NOT EXISTS user_rules (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, rules_text TEXT)"); ensure_tasks_table($pdo); $pdo->exec("CREATE TABLE IF NOT EXISTS rl (ip TEXT PRIMARY KEY, fails INTEGER, expire INTEGER)"); $pdo->exec("CREATE TABLE IF NOT EXISTS task_details (title TEXT PRIMARY KEY NOT NULL, address TEXT, description TEXT, related_person TEXT, checklist TEXT)"); $pdo->exec("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, val TEXT)"); if ($pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() == 0) { insert_user($pdo, USER1, USER1, USER1, USER1, 1); } $pdo->exec("PRAGMA user_version = 1"); }
- $cfg = array_column($pdo->query("SELECT key,val FROM config ORDER BY key")->fetchAll(), 'val', 'key'); if (defined('APP_DEBUG') && APP_DEBUG) $time_db_ms = round((hrtime(true) - $time_dbinit) / 1e6, 2);
-/* EOF src/database.php */
-
-
 
 
 
@@ -129,114 +135,32 @@ class DateContext { public readonly string $today; public readonly string $time;
 
 
 
+/* included from src/database.php [[[*/
+if (defined('APP_DEBUG') && APP_DEBUG) $time_dbinit = hrtime(true); $pdo = new PDO('sqlite:' . DB_FILE, null, null, [ PDO::ATTR_ERRMODE =>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC, ]); $pdo->exec("
+	PRAGMA foreign_keys = ON;
+	PRAGMA synchronous = NORMAL;
+	PRAGMA temp_store = MEMORY;
+	PRAGMA cache_size = -20000;
+"); if ($pdo->query("PRAGMA journal_mode")->fetchColumn() !== 'wal') { $pdo->exec("PRAGMA journal_mode=WAL;"); }
+ 
+function ensure_tasks_table(PDO $pdo): void { $pdo->exec("CREATE TABLE IF NOT EXISTS tasks (
+		id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+		task_date TEXT, title TEXT, start_time TEXT, end_time TEXT, status INTEGER DEFAULT 0, source TEXT NOT NULL DEFAULT 'manual', notes TEXT DEFAULT '',
+		UNIQUE(user_id, task_date, title)
+	)"); $pdo->exec("CREATE INDEX IF NOT EXISTS idx_tasks_date ON tasks(task_date)"); $pdo->exec("CREATE INDEX IF NOT EXISTS idx_tasks_date_title ON tasks(task_date, title, user_id)"); }
+ if ((int)$pdo->query("PRAGMA user_version")->fetchColumn() < 1) { $pdo->exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT, real_name TEXT, contact TEXT, force_password_change INTEGER DEFAULT 0)"); $pdo->exec("CREATE TABLE IF NOT EXISTS user_rules (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, rules_text TEXT)"); ensure_tasks_table($pdo); $pdo->exec("CREATE TABLE IF NOT EXISTS rl (ip TEXT PRIMARY KEY, fails INTEGER, expire INTEGER)"); $pdo->exec("CREATE TABLE IF NOT EXISTS task_details (title TEXT PRIMARY KEY NOT NULL, address TEXT, description TEXT, related_person TEXT, checklist TEXT)"); $pdo->exec("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, val TEXT)"); if ($pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() == 0) { insert_user($pdo, USER1, USER1, USER1, USER1, 1); } $pdo->exec("PRAGMA user_version = 1"); }
+ $cfg = array_column($pdo->query("SELECT key,val FROM config ORDER BY key")->fetchAll(), 'val', 'key'); if (defined('APP_DEBUG') && APP_DEBUG) $time_db_ms = round((hrtime(true) - $time_dbinit) / 1e6, 2);
+/* EOF src/database.php */
+
+
+
+
+
 /* included from src/plugins.php [[[*/
-$plugins=array('audit2'=>[], 'config'=>[], 'debug'=>[]); $plugin_routes = []; $plugin_views = []; $plugin_nav = []; $plugin_etag_routes = []; $plugin_write_routes = []; $plugin_dir = DATA_DIR . 'plugins/'; if (is_dir($plugin_dir)) { foreach (glob($plugin_dir . '*.php') as $pf) { if(!array_key_exists( pathinfo($pf,PATHINFO_FILENAME), $plugins)) $reg = include $pf; if (!is_array($reg) || empty($reg['id'])) continue; $plugins[$reg['id']] = $reg; if (isset($reg['routes'])) foreach ($reg['routes'] as $route => $handler) $plugin_routes[$route] = $handler; if (isset($reg['views'])) foreach ($reg['views'] as $vk => $vfn) $plugin_views[$vk] = $vfn; if (isset($reg['nav'])) $plugin_nav = array_merge($plugin_nav, $reg['nav']); if (isset($reg['etag_routes'])) $plugin_etag_routes = array_merge($plugin_etag_routes, $reg['etag_routes']); if (isset($reg['write_routes'])) $plugin_write_routes = array_merge($plugin_write_routes, $reg['write_routes']); } }
+$plugins=array('config'=>[], 'debug'=>[]); $plugin_routes = []; $plugin_views = []; $plugin_nav = []; $plugin_etag_routes = []; $plugin_write_routes = []; $plugin_dir = DATA_DIR . 'plugins/'; if (is_dir($plugin_dir)) { foreach (glob($plugin_dir . '*.php') as $pf) { if(!array_key_exists( pathinfo($pf,PATHINFO_FILENAME), $plugins)) $reg = include $pf; if (!is_array($reg) || empty($reg['id'])) continue; $plugins[$reg['id']] = $reg; if (isset($reg['routes'])) foreach ($reg['routes'] as $route => $handler) $plugin_routes[$route] = $handler; if (isset($reg['views'])) foreach ($reg['views'] as $vk => $vfn) $plugin_views[$vk] = $vfn; if (isset($reg['nav'])) $plugin_nav = array_merge($plugin_nav, $reg['nav']); if (isset($reg['etag_routes'])) $plugin_etag_routes = array_merge($plugin_etag_routes, $reg['etag_routes']); if (isset($reg['write_routes'])) $plugin_write_routes = array_merge($plugin_write_routes, $reg['write_routes']); } }
  foreach ($plugins as $id => $reg) { if (!isset($reg['schema_version']) || !isset($reg['schema'])) continue; $key = 'plugin_schema_' . $id; $cur = (int)($cfg[$key] ?? 0); if ($cur < $reg['schema_version']) { foreach ((array)$reg['schema'] as $sql) $pdo->exec($sql); $pdo->prepare("INSERT INTO config (key,val) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET val=excluded.val") ->execute([$key, (string)$reg['schema_version']]); $cfg[$key] = (string)$reg['schema_version']; } }
 /* EOF src/plugins.php */
 // ─── INLINED PLUGINS
-
-
-/* included from ./plugins/audit2.php [[[*/
-declare(strict_types=1); $_aud_i18n = [ 'nav_audit' => ['Audits', 'Auditid'], 'aud_runs' => ['Runs', 'Auditid'], 'aud_templates' => ['Templates', 'Šabloonid'], 'aud_report' => ['Report', 'Aruanne'], 'aud_access' => ['Access', 'Juurdepääs'], 'aud_no_runs' => ['No audits yet.', 'Auditeid pole veel.'], 'aud_no_templates' => ['No templates yet.', 'Šabloone pole veel.'], 'aud_draft' => ['Draft', 'Mustand'], 'aud_issues' => ['Issues', 'Probleemid'], 'aud_due' => ['Due', 'Tähtajaks'], 'aud_overdue' => ['Overdue', 'Tähtaeg möödas'], 'aud_start_new' => ['Start audit', 'Alusta auditit'], 'aud_back' => ['‹ Back', '‹ Tagasi'], 'aud_commit' => ['Commit audit', 'Kinnita audit'], 'aud_read_only' => ['Committed — read only.', 'Kinnitatud — kirjutuskaitstud.'], 'aud_committed_at' => ['Committed at', 'Kinnitatud'], 'aud_print' => ['🖨 Print', '🖨 Prindi'], 'aud_comment' => ['Comment', 'Kommentaar'], 'aud_saved_locally' => ['Saved locally', 'Salvestatud kohapeal'], 'aud_save' => ['Save template', 'Salvesta šabloon'], 'aud_delete' => ['Disable', 'Keela'], 'aud_new_template' => ['New template', 'Uus šabloon'], 'aud_title' => ['Title', 'Pealkiri'], 'aud_target' => ['Target task', 'Sihtülesanne'], 'aud_target_any' => ['— any —', '— kõik —'], 'aud_interval' => ['Interval', 'Intervall'], 'aud_int_task_done' => ['On task completion', 'Ülesande lõpetamisel'], 'aud_int_week_end' => ['Weekly', 'Nädalane'], 'aud_int_month_end' => ['Monthly', 'Kuine'], 'aud_subtasks' => ['Checklist items', 'Kontrollnimekiri'], 'aud_add_subtask' => ['+ item', '+ punkt'], 'aud_active' => ['Active', 'Aktiivne'], 'aud_disabled' => ['Disabled', 'Välja lülitatud'], 'aud_no_access' => ['No audit access.', 'Auditile juurdepääs puudub.'], 'aud_access_title' => ['Audit access', 'Auditi juurdepääs'], 'aud_subtask_passrate'=> ['Item pass rate', 'Punkti edukus'], 'aud_worker_compl' => ['Worker compliance', 'Töötaja vastavus'], 'aud_print_auditor' => ['Auditor', 'Auditeerija'], 'aud_print_date' => ['Audit date', 'Auditi kuupäev'], 'aud_print_committed' => ['Committed', 'Kinnitatud'], 'aud_print_summary' => ['Summary', 'Kokkuvõte'], 'aud_print_pass' => ['✓ OK', '✓ Korras'], 'aud_print_fail' => ['✗ Issue', '✗ Probleem'], ]; 
-function __aud(string $key): string { global $_aud_i18n, $langi; $li = $langi ?? 0; return $_aud_i18n[$key][$li] ?? ($_aud_i18n[$key][0] ?? $key); }
- 
-function _aud_intervals(): array { return ['task_done', 'week_end', 'month_end']; }
- 
-function _aud_can(bool $is_admin, int $uid, PDO $pdo): bool { if ($is_admin) return true; $s = $pdo->prepare("SELECT 1 FROM audit_access WHERE user_id=?"); $s->execute([$uid]); return (bool)$s->fetchColumn(); }
- 
-function _aud_parse_subtasks(mixed $raw): ?array { if (is_string($raw)) { $decoded = json_decode($raw, true); if (!is_array($decoded)) return null; $raw = $decoded; } if (!is_array($raw)) return null; $out = []; foreach ($raw as $s) { if (!is_string($s)) return null; $t = trim($s); if ($t !== '') $out[] = $t; } return $out; }
- 
-function _aud_template_by_id(PDO $pdo, int $id): ?array { $s = $pdo->prepare("SELECT id, title, target, interval, subtasks, active FROM audit_templates WHERE id=?"); $s->execute([$id]); $t = $s->fetch(); if (!$t) return null; $sub = $pdo->prepare("SELECT id, sort_order, name FROM audit_subtasks WHERE template_id=? ORDER BY sort_order, id"); $sub->execute([$id]); $t['subtasks_ordered'] = $sub->fetchAll(); $t['id'] = (int)$t['id']; $t['active'] = (int)$t['active']; return $t; }
- 
-function _aud_sync_subtasks(PDO $pdo, int $template_id, array $names): void { $pdo->prepare("DELETE FROM audit_subtasks WHERE template_id=?")->execute([$template_id]); $ins = $pdo->prepare("INSERT INTO audit_subtasks (template_id, sort_order, name) VALUES (?,?,?)"); foreach ($names as $i => $n) $ins->execute([$template_id, $i, $n]); }
- 
-function _aud_week_bounds(string $ymd): array { $ts= strtotime($ymd); $dow = (int)date('N', $ts); $mon = date('Y-m-d', strtotime($ymd . ' -' . ($dow - 1) . ' days')); return [$mon, date('Y-m-d', strtotime($mon . ' +6 days'))]; }
- 
-function _aud_month_bounds(string $ymd): array { return [date('Y-m-01', strtotime($ymd)), date('Y-m-t', strtotime($ymd))]; }
- 
-function plugin_audit_template(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { return match($method) { 'GET' => _aud_templates_list($pdo, $is_admin), 'POST'=> _aud_template_save($pdo, $d, $is_admin), default => [405, ['error' => 'method_not_allowed']], }; }
- 
-function _aud_templates_list(PDO $pdo, bool $is_admin): array { $sql = "SELECT id, title, target, interval, subtasks, active FROM audit_templates"; if (!$is_admin) $sql .= " WHERE active=1"; $sql .= " ORDER BY title"; $out = []; foreach ($pdo->query($sql)->fetchAll() as $r) { $decoded = json_decode($r['subtasks'] ?? '[]', true); $out[] = [ 'id' => (int)$r['id'], 'title' => $r['title'], 'target' => $r['target'], 'interval' => $r['interval'], 'subtasks' => is_array($decoded) ? $decoded : [], 'active' => (int)$r['active'], ]; } return [200, $out]; }
- 
-function _aud_template_save(PDO $pdo, array $d, bool $is_admin): array { if (!$is_admin) return [403, ['error' => 'forbidden']]; $title = trim($d['title'] ?? ''); $target = trim($d['target'] ?? ''); $interval = $d['interval'] ?? ''; $subtasks = _aud_parse_subtasks($d['subtasks'] ?? []); if ($title === '') return [400, ['error' => 'title required']]; if (!in_array($interval, _aud_intervals(), true)) return [400, ['error' => 'invalid_interval']]; if ($subtasks === null) return [400, ['error' => 'invalid_subtasks']]; if (!$subtasks) return [400, ['error' => 'subtasks required']]; $js = json_encode(array_values($subtasks), JSON_UNESCAPED_UNICODE); $active = isset($d['active']) ? (int)!!$d['active'] : 1; return db_try('audit_template/save', function() use ($pdo, $d, $title, $target, $interval, $subtasks, $js, $active) { if (!empty($d['id'])) { $id = (int)$d['id']; $pdo->prepare("UPDATE audit_templates SET title=?, target=?, interval=?, subtasks=?, active=? WHERE id=?") ->execute([$title, $target !== '' ? $target : null, $interval, $js, $active, $id]); } else { $pdo->prepare("INSERT INTO audit_templates (title, target, interval, subtasks, active) VALUES (?,?,?,?,?)") ->execute([$title, $target !== '' ? $target : null, $interval, $js, $active]); $id = (int)$pdo->lastInsertId(); } _aud_sync_subtasks($pdo, $id, $subtasks); return [200, ['msg' => 'ok', 'id' => $id]]; }); }
- 
-function plugin_audit_template_delete(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if (!$is_admin) return [403, ['error' => 'forbidden']]; $id = (int)($d['id'] ?? 0); if ($id <= 0) return [400, ['error' => 'id required']]; return db_try('audit_template/delete', function() use ($pdo, $id) { $pdo->prepare("UPDATE audit_templates SET active=0 WHERE id=?")->execute([$id]); return [200, ['msg' => 'ok']]; }); }
- 
-function plugin_audit_run(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { if ($method !== 'GET') return [405, ['error' => 'method_not_allowed']]; if (!_aud_can($is_admin, $uid, $pdo)) return [403, ['error' => 'forbidden']]; if (!empty($_GET['id'])) return _aud_run_get($pdo, (int)$_GET['id'], $uid, $is_admin); $where = []; $params = []; if (!$is_admin) { $where[] = 'r.user_id=?'; $params[] = $uid; } elseif (!empty($_GET['user_id'])) { $where[] = 'r.user_id=?'; $params[] = (int)$_GET['user_id']; } if (!empty($_GET['template_id'])) { $where[] = 'r.template_id=?'; $params[] = (int)$_GET['template_id']; } if (!empty($_GET['from'])) { $where[] = 'r.run_date>=?'; $params[] = $_GET['from']; } if (!empty($_GET['to'])) { $where[] = 'r.run_date<=?'; $params[] = $_GET['to']; } $sql = "SELECT r.id, r.template_id, r.run_date, r.user_id, r.results, r.has_issues, r.committed_at,
-				t.title AS template_title, u.username
-			FROM audit_runs r
-			LEFT JOIN audit_templates t ON t.id=r.template_id
-			LEFT JOIN users u ON u.id=r.user_id"; if ($where) $sql .= ' WHERE ' . implode(' AND ', $where); $sql .= ' ORDER BY r.run_date DESC, r.id DESC LIMIT 200'; $stmt = $pdo->prepare($sql); $stmt->execute($params); $out = []; foreach ($stmt->fetchAll() as $r) { $results = json_decode($r['results'] ?? '[]', true); $results = is_array($results) ? $results : []; $done = count(array_filter($results, fn($it) => !empty($it['done']))); $out[] = [ 'id' => (int)$r['id'], 'template_id' => (int)$r['template_id'], 'template_title' => $r['template_title'], 'run_date' => $r['run_date'], 'user_id' => (int)$r['user_id'], 'username' => $r['username'], 'has_issues' => (int)$r['has_issues'], 'committed_at' => $r['committed_at'], 'done_count' => $done, 'total_count' => count($results), ]; } return [200, $out]; }
- 
-function _aud_run_get(PDO $pdo, int $run_id, int $uid, bool $is_admin): array { $stmt = $pdo->prepare("SELECT id, template_id, run_date, user_id, results, has_issues, committed_at FROM audit_runs WHERE id=?"); $stmt->execute([$run_id]); $r = $stmt->fetch(); if (!$r) return [404, ['error' => 'not_found']]; if (!$is_admin && (int)$r['user_id'] !== $uid) return [403, ['error' => 'forbidden']]; $results = json_decode($r['results'] ?? '[]', true); return [200, [ 'id' => (int)$r['id'], 'template_id'=> (int)$r['template_id'], 'template' => _aud_template_by_id($pdo, (int)$r['template_id']), 'run_date' => $r['run_date'], 'user_id' => (int)$r['user_id'], 'results' => is_array($results) ? $results : [], 'has_issues' => (int)$r['has_issues'], 'committed_at' => $r['committed_at'], ]]; }
- 
-function plugin_audit_run_create(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if ($method !== 'POST') return [405, ['error' => 'method_not_allowed']]; if (!_aud_can($is_admin, $uid, $pdo)) return [403, ['error' => 'forbidden']]; $tpl_id = (int)($d['template_id'] ?? 0); if ($tpl_id <= 0) return [400, ['error' => 'template_id required']]; $tpl = _aud_template_by_id($pdo, $tpl_id); if (!$tpl || !$tpl['active']) return [404, ['error' => 'template_not_found']]; $target_uid = ($is_admin && !empty($d['user_id'])) ? (int)$d['user_id'] : $uid; return db_try('audit_run/create', function() use ($pdo, $tpl_id, $target_uid, $dc) { $pdo->prepare("INSERT INTO audit_runs (template_id, run_date, user_id, results, has_issues) VALUES (?,?,?,?,0)") ->execute([$tpl_id, $dc->today, $target_uid, '[]']); return [200, ['msg' => 'ok', 'id' => (int)$pdo->lastInsertId()]]; }); }
- 
-function plugin_audit_check_task(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if ($method !== 'POST') return [405, ['error' => 'method_not_allowed']]; $task_id = (int)($d['task_id'] ?? 0); if ($task_id <= 0) return [400, ['error' => 'task_id required']]; $stmt = $pdo->prepare("SELECT title, user_id, status FROM tasks WHERE id=?"); $stmt->execute([$task_id]); $task = $stmt->fetch(); if (!$task) return [404, ['error' => 'task_not_found']]; if (!$is_admin && (int)$task['user_id'] !== $uid) return [403, ['error' => 'forbidden']]; if ((int)$task['status'] !== 2) return [200, ['msg' => 'not_done', 'run_id' => null]]; $t = $pdo->prepare("SELECT id FROM audit_templates WHERE active=1 AND interval='task_done' AND target=? LIMIT 1"); $t->execute([$task['title']]); $tpl_id = (int)$t->fetchColumn(); if (!$tpl_id) { $t2 = $pdo->prepare("SELECT id FROM audit_templates WHERE active=1 AND interval='task_done' AND target IS NULL LIMIT 1"); $t2->execute(); $tpl_id = (int)$t2->fetchColumn(); } if (!$tpl_id) return [200, ['msg' => 'no_template', 'run_id' => null]]; $ex = $pdo->prepare("SELECT id FROM audit_runs WHERE template_id=? AND user_id=? AND run_date=? AND committed_at IS NULL LIMIT 1"); $ex->execute([$tpl_id, (int)$task['user_id'], $dc->today]); if ($rid = (int)$ex->fetchColumn()) return [200, ['msg' => 'existing', 'run_id' => $rid]]; return db_try('audit/check_task', function() use ($pdo, $tpl_id, $task, $dc) { $pdo->prepare("INSERT INTO audit_runs (template_id, run_date, user_id, results, has_issues) VALUES (?,?,?,?,0)") ->execute([$tpl_id, $dc->today, (int)$task['user_id'], '[]']); return [200, ['msg' => 'created', 'run_id' => (int)$pdo->lastInsertId()]]; }); }
- 
-function plugin_audit_due(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { if ($method !== 'GET') return [405, ['error' => 'method_not_allowed']]; if (!_aud_can($is_admin, $uid, $pdo)) return [403, ['error' => 'forbidden']]; [$wkStart] = _aud_week_bounds($dc->today); [$moStart] = _aud_month_bounds($dc->today); $target_uid = ($is_admin && !empty($_GET['user_id'])) ? (int)$_GET['user_id'] : $uid; $stmt = $pdo->prepare("SELECT t.id, t.title, t.interval,
-			(SELECT MAX(r.run_date) FROM audit_runs r
-			 WHERE r.template_id=t.id AND r.user_id=? AND r.committed_at IS NOT NULL) AS last_run
-		FROM audit_templates t WHERE t.active=1 AND t.interval IN ('week_end','month_end') ORDER BY t.title"); $stmt->execute([$target_uid]); $out = []; foreach ($stmt->fetchAll() as $r) { $last = $r['last_run']; $window = $r['interval'] === 'week_end' ? $wkStart : $moStart; if (!$last || $last < $window) $out[] = [ 'template_id' => (int)$r['id'], 'title' => $r['title'], 'interval' => $r['interval'], 'last_run' => $last, 'overdue' => $last && $last < $window, ]; } return [200, $out]; }
- 
-function plugin_audit_commit(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if ($method !== 'POST') return [405, ['error' => 'method_not_allowed']]; $run_id = (int)($d['run_id'] ?? 0); if ($run_id <= 0) return [400, ['error' => 'run_id required']]; if (!is_array($d['results'] ?? null)) return [400, ['error' => 'results must be array']]; $chk = $pdo->prepare("SELECT user_id, committed_at FROM audit_runs WHERE id=?"); $chk->execute([$run_id]); $row = $chk->fetch(); if (!$row) return [404, ['error' => 'not_found']]; if (!$is_admin && (int)$row['user_id'] !== $uid) return [403, ['error' => 'forbidden']]; if ($row['committed_at']) return [400, ['error' => 'already_committed']]; $issues = 0; $clean = []; foreach ($d['results'] as $r) { if (!is_array($r)) continue; $done = !empty($r['done']) ? 1 : 0; if (!$done) $issues++; $clean[] = ['done' => $done, 'comment' => is_string($r['comment'] ?? null) ? trim((string)$r['comment']) : '']; } return db_try('audit_commit', function() use ($pdo, $run_id, $clean, $issues, $dc) { $pdo->prepare("UPDATE audit_runs SET results=?, has_issues=?, committed_at=? WHERE id=? AND committed_at IS NULL") ->execute([json_encode($clean, JSON_UNESCAPED_UNICODE), $issues > 0 ? 1 : 0, $dc->today . ' ' . $dc->time, $run_id]); return [200, ['msg' => 'ok', 'has_issues' => $issues > 0 ? 1 : 0]]; }); }
- 
-function plugin_audit_print(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { if ($method !== 'GET') return [405, ['error' => 'method_not_allowed']]; $run_id = (int)($_GET['run_id'] ?? 0); if ($run_id <= 0) return [400, ['error' => 'run_id required']]; $stmt = $pdo->prepare("SELECT r.*, u.username, u.real_name, u.contact AS user_contact
-		FROM audit_runs r LEFT JOIN users u ON u.id=r.user_id WHERE r.id=?"); $stmt->execute([$run_id]); $row = $stmt->fetch(); if (!$row) return [404, ['error' => 'not_found']]; if (!$is_admin && (int)$row['user_id'] !== $uid) return [403, ['error' => 'forbidden']]; if (!$row['committed_at']) return [400, ['error' => 'not_committed']]; $results = json_decode($row['results'] ?? '[]', true); if (!is_array($results)) $results = []; global $cfg; $org = array_filter($cfg ?? [], fn($v, $k) => str_starts_with($k, 'org_'), ARRAY_FILTER_USE_BOTH); return [200, [ 'run' => ['id' => (int)$row['id'], 'run_date' => $row['run_date'], 'committed_at' => $row['committed_at'], 'has_issues' => (int)$row['has_issues'], 'results' => $results], 'template' => _aud_template_by_id($pdo, (int)$row['template_id']), 'auditor'=> ['username' => $row['username'] ?? '', 'real_name' => $row['real_name'] ?? '', 'contact' => $row['user_contact'] ?? ''], 'org' => $org, 'today' => $dc->today, ]]; }
- 
-function plugin_audit_report(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { if ($method !== 'GET') return [405, ['error' => 'method_not_allowed']]; if (!$is_admin) return [403, ['error' => 'forbidden']]; $where = ['r.committed_at IS NOT NULL']; $params = []; if (!empty($_GET['from'])) { $where[] = 'r.run_date>=?'; $params[] = $_GET['from']; } if (!empty($_GET['to'])) { $where[] = 'r.run_date<=?'; $params[] = $_GET['to']; } if (!empty($_GET['template_id'])) { $where[] = 'r.template_id=?'; $params[] = (int)$_GET['template_id']; } $stmt = $pdo->prepare("SELECT r.template_id, r.user_id, r.results, r.has_issues, t.title AS template_title, u.username
-		FROM audit_runs r LEFT JOIN audit_templates t ON t.id=r.template_id LEFT JOIN users u ON u.id=r.user_id
-		WHERE " . implode(' AND ', $where)); $stmt->execute($params); $by_tpl = []; $by_worker = []; foreach ($stmt->fetchAll() as $r) { $tid= (int)$r['template_id']; $uidr = (int)$r['user_id']; $by_worker[$uidr] ??= ['user_id' => $uidr, 'username' => $r['username'], 'runs' => 0, 'issues' => 0]; $by_worker[$uidr]['runs']++; if ((int)$r['has_issues']) $by_worker[$uidr]['issues']++; $results = json_decode($r['results'] ?? '[]', true); if (!is_array($results)) continue; $by_tpl[$tid] ??= ['template_id' => $tid, 'template_title' => $r['template_title'], 'items' => []]; foreach ($results as $idx => $item) { $by_tpl[$tid]['items'][$idx] ??= ['done' => 0, 'total' => 0]; $by_tpl[$tid]['items'][$idx]['total']++; if (!empty($item['done'])) $by_tpl[$tid]['items'][$idx]['done']++; } } foreach ($by_tpl as $tid => &$entry) { $tpl = _aud_template_by_id($pdo, $tid); $names = $tpl ? array_column($tpl['subtasks_ordered'], 'name') : []; $items = []; foreach ($entry['items'] as $idx => $stat) $items[] = ['idx' => $idx, 'name' => $names[$idx] ?? ('#' . ($idx + 1)), 'done' => $stat['done'], 'total' => $stat['total'], 'rate' => $stat['total'] ? round(100 * $stat['done'] / $stat['total']) : 0]; usort($items, fn($a, $b) => $a['rate'] <=> $b['rate']); $entry['items'] = $items; } unset($entry); return [200, ['by_template' => array_values($by_tpl), 'by_worker' => array_values($by_worker)]]; }
- 
-function plugin_audit_access(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'GET'): array { if (!$is_admin) return [403, ['error' => 'forbidden']]; if ($method === 'GET') { $stmt = $pdo->query("SELECT u.id, u.username, u.real_name, (a.user_id IS NOT NULL) AS has_access
-			FROM users u LEFT JOIN audit_access a ON a.user_id=u.id ORDER BY u.username"); return [200, $stmt->fetchAll()]; } if ($method === 'POST') { $target = (int)($d['user_id'] ?? 0); if ($target <= 1) return [400, ['error' => 'invalid_user']]; $grant = !empty($d['grant']); return db_try('audit_access', function() use ($pdo, $target, $grant) { if ($grant) $pdo->prepare("INSERT OR IGNORE INTO audit_access (user_id) VALUES (?)")->execute([$target]); else $pdo->prepare("DELETE FROM audit_access WHERE user_id=?")->execute([$target]); return [200, ['msg' => 'ok']]; }); } return [405, ['error' => 'method_not_allowed']]; }
- 
-function view_audit(): void { ?>
-<div id="audit-shell">
-	<div id="audit-toolbar" class="sub-nav no_Print">
-		<a href="#" data-aud-tab="runs"	class="active"><?= __aud('aud_runs') ?></a>
-		<a href="#" data-aud-tab="templates" class="aud-admin-only hidden"><?= __aud('aud_templates') ?></a>
-		<a href="#" data-aud-tab="report"	class="aud-admin-only hidden"><?= __aud('aud_report') ?></a>
-		<a href="#" data-aud-tab="access"	class="aud-admin-only hidden"><?= __aud('aud_access') ?></a>
-	</div>
-	<div id="audit-due-banner" class="hidden"></div>
-	<section id="audit-panel-runs"></section>
-	<section id="audit-panel-templates" class="hidden aud-admin-only"></section>
-	<section id="audit-panel-report"	class="hidden aud-admin-only"></section>
-	<section id="audit-panel-access"	class="hidden aud-admin-only"></section>
-	<section id="audit-panel-run"	 class="hidden"></section>
-</div>
-<?php }
- 
-function view_audit_print(): void { ?>
-<div id="audit-print-container"></div>
-<?php }
- $_preg = [ 'id' => 'audit', 'schema_version' => 2, 'schema' => [ "CREATE TABLE IF NOT EXISTS audit_templates (
-			id	 INTEGER PRIMARY KEY,
-			title	TEXT NOT NULL,
-			target TEXT,
-			interval TEXT NOT NULL,
-			subtasks TEXT NOT NULL,
-			active INTEGER DEFAULT 1
-		)", "CREATE TABLE IF NOT EXISTS audit_runs (
-			id		 INTEGER PRIMARY KEY,
-			template_id INTEGER REFERENCES audit_templates(id) ON DELETE CASCADE,
-			run_date	 TEXT NOT NULL,
-			user_id	INTEGER REFERENCES users(id),
-			results	TEXT NOT NULL,
-			has_issues INTEGER DEFAULT 0,
-			committed_at TEXT
-		)", "CREATE TABLE IF NOT EXISTS audit_subtasks (
-			id		INTEGER PRIMARY KEY,
-			template_id INTEGER REFERENCES audit_templates(id) ON DELETE CASCADE,
-			sort_order INTEGER NOT NULL,
-			name		TEXT NOT NULL
-		)", "CREATE TABLE IF NOT EXISTS audit_access (
-			user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
-		)", "CREATE INDEX IF NOT EXISTS idx_audit_runs_tmpl ON audit_runs(template_id, run_date)", "CREATE INDEX IF NOT EXISTS idx_audit_runs_issues ON audit_runs(has_issues) WHERE has_issues=1", ], 'routes' => [ 'audit_template' => 'plugin_audit_template', 'audit_template/delete' => 'plugin_audit_template_delete', 'audit_run' => 'plugin_audit_run', 'audit_run/create' => 'plugin_audit_run_create', 'audit_run/check_task'=> 'plugin_audit_check_task', 'audit_run/due' => 'plugin_audit_due', 'audit_run/print' => 'plugin_audit_print', 'audit_commit' => 'plugin_audit_commit', 'audit_report' => 'plugin_audit_report', 'audit_access' => 'plugin_audit_access', ], 'views' => [ 'audit' => 'view_audit', 'audit_print' => 'view_audit_print', ], 'nav' => ['audit' => __aud('nav_audit')], 'etag_routes'=> ['audit_template', 'audit_run', 'audit_run/due', 'audit_run/print', 'audit_report', 'audit_access'], 'write_routes' => ['audit_template', 'audit_template/delete', 'audit_run/create', 'audit_run/check_task', 'audit_commit', 'audit_access'], ]; $_pid = $_preg['id'] ?? ''; if ($_pid) { $plugins[$_pid] = $_preg; if (isset($_preg['routes'])) foreach ($_preg['routes'] as $_r=> $_h) $plugin_routes[$_r]= $_h; if (isset($_preg['views'])) foreach ($_preg['views'] as $_vk => $_vfn) $plugin_views[$_vk]= $_vfn; if (isset($_preg['nav'])) $plugin_nav = array_merge($plugin_nav, $_preg['nav']); if (isset($_preg['etag_routes']))$plugin_etag_routes= array_merge($plugin_etag_routes,$_preg['etag_routes']); if (isset($_preg['write_routes'])) $plugin_write_routes = array_merge($plugin_write_routes, $_preg['write_routes']); }
- $_pid = $_preg["id"] ?? ""; if ($_pid) { $plugins[$_pid] = $_preg; if (isset($_preg["routes"])) foreach ($_preg["routes"] as $_r => $_h) $plugin_routes[$_r] = $_h; if (isset($_preg["views"])) foreach ($_preg["views"] as $_vk => $_vfn) $plugin_views[$_vk] = $_vfn; if (isset($_preg["nav"])) $plugin_nav = array_merge($plugin_nav, $_preg["nav"]); if (isset($_preg["etag_routes"])) $plugin_etag_routes = array_merge($plugin_etag_routes, $_preg["etag_routes"]); if (isset($_preg["write_routes"])) $plugin_write_routes = array_merge($plugin_write_routes, $_preg["write_routes"]); }
-/* EOF ./plugins/audit2.php */
-
 
 
 /* included from ./plugins/config.php [[[*/
@@ -257,11 +181,11 @@ function plugin_archive_year( PDO $pdo, array $d, int $uid, bool $is_admin, Date
 /* included from ./plugins/debug.php [[[*/
 function app_log(string $line): void { if (!defined('JS_ERR_LOGFILE')) return; $f = JS_ERR_LOGFILE; file_put_contents($f, $line, file_exists($f) && filesize($f) > 1048576 ? 0 : FILE_APPEND); }
  
-function plugin_debug_timer(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { $fetch = $d['fetch'] ?? ''; $render = $d['render'] ?? ''; $msg = $d['qs'] . "\tjs:" . $d['jstm'] . "ms\tfetch:" . $fetch . "ms\trender:" . $render . "ms\n"; file_put_contents(TV_TIMERS_LOGFILE, $msg, FILE_APPEND); return [200, ['msg' => 'ok']]; }
- 
-function timer_log(array $d): array { $msg = ($d['qs'] ?? '') . "\tjs:" . ($d['jstm'] ?? 0) . "ms\tfetch:" . ($d['fetch'] ?? '') . "ms\trender:" . ($d['render'] ?? '') . "ms\n"; file_put_contents(TV_TIMERS_LOGFILE, $msg, FILE_APPEND); return [200, ['msg' => 'ok']]; }
+function plugin_debug_timer(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if (!defined('APP_DEBUG') || !APP_DEBUG ) return [200, ['msg' => 'ignored']]; $fetch = $d['fetch'] ?? ''; $render = $d['render'] ?? ''; $msg = $d['qs'] . "\tjs:" . $d['jstm'] . "ms\tfetch:" . $fetch . "ms\trender:" . $render . "ms\n"; file_put_contents(TV_JS_TIMERS, $msg, FILE_APPEND); return [200, ['msg' => 'ok']]; }
  
 function plugin_debug_log(PDO $pdo, array $d, int $uid, bool $is_admin, DateContext $dc, string $method = 'POST'): array { if (!defined('APP_DEBUG') || !APP_DEBUG) return [200, ['msg' => 'ignored']]; app_log(sprintf("[%s] %s: %s | URL: %s\n", date('Y-m-d H:i:s'), strtoupper($d['type'] ?? 'UNKNOWN'), json_encode($d['payload'] ?? []), $d['url'] ?? 'unknown' )); return [200, ['msg' => 'logged']]; }
+ 
+function timer_log(array $d): array { if (!defined('APP_DEBUG') || !APP_DEBUG ) return [200, ['msg' => 'ignored']]; $msg = ($d['qs'] ?? '') . "\tjs:" . ($d['jstm'] ?? 0) . "ms\tfetch:" . ($d['fetch'] ?? '') . "ms\trender:" . ($d['render'] ?? '') . "ms\n"; file_put_contents(TV_JS_TIMERS, $msg, FILE_APPEND); return [200, ['msg' => 'ok']]; }
  $_preg = [ 'id' => 'debug', 'routes' => [ 'debug_log' => 'plugin_debug_log', 'debug_log/jstimer' => 'plugin_debug_timer', ], ]; $_pid = $_preg["id"] ?? ""; if ($_pid) { $plugins[$_pid] = $_preg; if (isset($_preg["routes"])) foreach ($_preg["routes"] as $_r => $_h) $plugin_routes[$_r] = $_h; if (isset($_preg["views"])) foreach ($_preg["views"] as $_vk => $_vfn) $plugin_views[$_vk] = $_vfn; if (isset($_preg["nav"])) $plugin_nav = array_merge($plugin_nav, $_preg["nav"]); if (isset($_preg["etag_routes"])) $plugin_etag_routes = array_merge($plugin_etag_routes, $_preg["etag_routes"]); if (isset($_preg["write_routes"])) $plugin_write_routes = array_merge($plugin_write_routes, $_preg["write_routes"]); }
 /* EOF ./plugins/debug.php */
 
@@ -322,7 +246,7 @@ function api_tasks_save(PDO $pdo, array $d, int $uid, bool $is_admin): array { i
  
 function api_tasks_delete(PDO $pdo, array $d, int $uid, bool $is_admin): array { if (empty($d['id'])) return [400, ['error' => 'id is required']]; $sql="DELETE FROM tasks WHERE id=? AND status < 2"; $params=[$d['id']]; if (!$is_admin) { $sql .= " AND user_id=?"; $params[]=$uid; } $stmt=$pdo->prepare($sql); $stmt->execute($params); if ($stmt->rowCount() === 0) return [404, ['error' => 'not_found']]; return [200, ['msg' => 'ok']]; }
  
-function api_rules_generate(PDO $pdo, array $d, int $target_uid, string $req_ym): array { $rules_json=trim($d['rules_txt'] ?? ''); $ym_first = $req_ym . '-01'; $next_first = date('Y-m-d', strtotime($ym_first . ' +1 month')); $rules=json_decode($rules_json, true); if (!is_array($rules)) return [400, ['error' => 'Invalid rules JSON']]; $pdo->beginTransaction(); try { $pdo->prepare("INSERT INTO user_rules (user_id, rules_text) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET rules_text=excluded.rules_text") ->execute([$target_uid, $rules_json]); $pdo->prepare("DELETE FROM tasks WHERE user_id=? AND task_date >= ? AND task_date < ? AND status=0 AND source='rule'") ->execute([$target_uid, $ym_first, $next_first]); $insert_stmt=$pdo->prepare("INSERT OR IGNORE INTO tasks (user_id, task_date, title, start_time, end_time, status, notes, source) VALUES (?, ?, ?, ?, ?, 0, '', 'rule')"); $y=(int)substr($req_ym, 0, 4); $m=(int)substr($req_ym, 5, 2); $days_in_month=(int)date('t', mktime(0, 0, 0, $m, 1, $y)); $fw_info = full_weeks_info($req_ym); $iso_to_rel = []; foreach ($fw_info as $rel => $wk) $iso_to_rel[$wk['iso']] = $rel; for ($day=1; $day <= $days_in_month; $day++) { $ts=mktime(12, 0, 0, $m, $day, $y); $day_num=(int)date('N', $ts); $iso_week=(int)date('W', $ts); $rel_week=$iso_to_rel[$iso_week] ?? 0; if ($rel_week === 0) continue; foreach ($rules as $r) { if (empty($r['title']) || empty($r['days']) || empty($r['weeks']) || empty($r['start']) || empty($r['end'])) continue; $day_col=strtr($r['days'], ['E'=>'1','T'=>'2','K'=>'3','N'=>'4','R'=>'5','L'=>'6','P'=>'7']); $match=(strpos($day_col, (string)$day_num) !== false) && (strpos((string)$r['weeks'], (string)$rel_week) !== false); if ($match) $insert_stmt->execute([$target_uid, date('Y-m-d', $ts), $r['title'], $r['start'], $r['end']]); } } $pdo->commit(); return [200, ['msg' => 'ok']]; } catch (Exception $e) { $pdo->rollBack(); error_log('api_rules_generate: ' . $e->getMessage()); return [500, ['error' => 'Schedule generation failed']]; } }
+function api_rules_generate(PDO $pdo, array $d, int $target_uid, string $req_ym): array { $rules_json=trim($d['rules_txt'] ?? ''); $ym_first = $req_ym . '-01'; $next_first = date('Y-m-d', strtotime($ym_first . ' +1 month')); $rules=json_decode($rules_json, true); if (!is_array($rules)) return [400, ['error' => 'Invalid rules JSON']]; $pdo->beginTransaction(); try { $pdo->prepare("INSERT INTO user_rules (user_id, rules_text) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET rules_text=excluded.rules_text") ->execute([$target_uid, $rules_json]); $pdo->prepare("DELETE FROM tasks WHERE user_id=? AND task_date >= ? AND task_date < ? AND status=0 AND source='rule'") ->execute([$target_uid, $ym_first, $next_first]); $insert_stmt=$pdo->prepare("INSERT OR IGNORE INTO tasks (user_id, task_date, title, start_time, end_time, status, notes, source) VALUES (?, ?, ?, ?, ?, 0, '', 'rule')"); $y=(int)substr($req_ym, 0, 4); $m=(int)substr($req_ym, 5, 2); $days_in_month=(int)date('t', mktime(0, 0, 0, $m, 1, $y)); $fw_info = full_weeks_info($req_ym); $iso_to_rel = []; foreach ($fw_info as $rel => $wk) $iso_to_rel[$wk['iso']] = $rel; for ($day=1; $day <= $days_in_month; $day++) { $ts=mktime(12, 0, 0, $m, $day, $y); $day_num=(int)date('N', $ts); $iso_week=(int)date('W', $ts); $rel_week=$iso_to_rel[$iso_week] ?? 0; $rel_week=$iso_to_rel[$iso_week] ?? 0; foreach ($rules as $r) { if ( empty($r['title']) || empty($r['days']) || empty($r['weeks']) || empty($r['start']) || empty($r['end'])) continue; $day_col=strtr($r['days'], ['E'=>'1','T'=>'2','K'=>'3','N'=>'4','R'=>'5','L'=>'6','P'=>'7']); if (!str_contains($day_col, (string)$day_num)) continue; $weeks=(string)$r['weeks']; $match=str_contains($weeks, '*') || ($rel_week > 0 && str_contains($weeks, (string)$rel_week)); if ($match) $insert_stmt->execute([$target_uid, date('Y-m-d', $ts), $r['title'], $r['start'], $r['end']]); } } $pdo->commit(); return [200, ['msg' => 'ok']]; } catch (Exception $e) { $pdo->rollBack(); error_log('api_rules_generate: ' . $e->getMessage()); return [500, ['error' => 'Schedule generation failed']]; } }
  
 function api_details_get(PDO $pdo): array { $all=$pdo->query("SELECT * FROM task_details ORDER BY title")->fetchAll(); $addresses = array_values(array_unique(array_filter(array_column($all, 'address')))); $contacts = array_values(array_unique(array_filter(array_column($all, 'related_person')))); $wal_status = $pdo->query("PRAGMA wal_checkpoint(PASSIVE);")->fetchAll(PDO::FETCH_ASSOC); if(array_sum($wal_status[0])==0) $db_status = "WAL OK"; else $db_status = "WAL checkpoint status: ". print_r($wal_status[0],true); $users = users_full_list($pdo); global $cfg; $config = array_map(fn($k,$v) => ['key'=>$k,'val'=>$v], array_keys($cfg), array_values($cfg)); return [200, [ 'details' => $all, 'known_addresses' => $addresses, 'known_contacts' => $contacts, 'db_status'=>$db_status, 'users'=>$users, 'config'=>$config ]]; }
  
@@ -356,12 +280,14 @@ $api = $_GET['api'] ?? null; if ($api !== null) { $method = $_SERVER['REQUEST_ME
 
 
 // --- HTML shell: everything below is the static page frame
+header('Content-Type: text/html; charset=utf-8'); 
 ?><!DOCTYPE html>
 <html lang="<?= $lang ?>">
 <head><meta charset="UTF-8">
 <title><?= htmlspecialchars(ORG_NAME) ?> – <?= __('app_title') ?></title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <link rel="manifest" href="?api=manifest">
+<link rel="preconnect" href="<?php echo $_SERVER['SERVER_NAME']; ?>">
 <meta name="theme-color" content="#333333">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -885,92 +811,6 @@ input[type="date"]::before{content: '🗓 ';
 <?php // Plugin CSS files
 if (is_dir($plugin_dir)) foreach (glob($plugin_dir . '*.css') as $pcss) include $pcss;
 ?>
-
-
-/* included from ./plugins/audit2.css [[[*/
-#audit-shell{max-width: 600px;
-margin: 0 auto;
-}
-#audit-toolbar{margin-bottom: var(--sp-4);
-}
-#audit-due-banner .aud-due-row{display: flex;
-justify-content: space-between;
-align-items: center;
-background: var(--c-bg-alt);
-border-left: 4px solid var(--c-primary);
-margin-bottom: var(--sp-2);
-padding: var(--sp-3);
-}
-.aud-item{padding: var(--sp-3);
-margin-bottom: var(--sp-2);
-border-bottom: 1px solid var(--c-border);
-}
-.aud-item:last-child{border-bottom: none;
-}
-.aud-task-row{display: flex;
-flex-direction: column;
-gap: var(--sp-2);
-padding: var(--sp-3) 0;
-border-bottom: 1px solid var(--c-border);
-}
-.aud-task-row label{display: flex;
-align-items: flex-start;
-gap: var(--sp-3);
-cursor: pointer;
-font-weight: var(--font-b);
-}
-.aud-task-row .aud-chk{width: 1.2rem;
-height: 1.2rem;
-margin-top: 2px;
-}
-.aud-task-row .aud-cmt{width: 100%;
-min-height: 3rem;
-font-size: 0.9rem;
-padding: var(--sp-2);
-border-radius: var(--radius);
-border: 1px solid var(--c-border);
-background: var(--c-bg-alt);
-}
-#audit-panel-templates input, #audit-panel-templates select, #audit-panel-templates textarea{display: block;
-width: 100%;
-margin-bottom: var(--sp-2);
-}
-#audit-print-container{padding: var(--sp-4);
-background: #fff;
-color: #000;
-}
-.aud-print-meta{margin-bottom: var(--sp-4);
-padding-bottom: var(--sp-3);
-border-bottom: 2px solid #000;
-}
-.aud-print-list{width: 100%;
-border-collapse: collapse;
-}
-.aud-print-list td{padding: var(--sp-2);
-border-bottom: 1px solid #ccc;
-vertical-align: top;
-}
-.aud-print-check{width: 80px;
-font-weight: bold;
-}
-.aud-print-name{font-weight: bold;
-}
-.aud-print-comment{font-weight: normal;
-font-style: italic;
-font-size: 0.9rem;
-margin-top: 4px;
-white-space: pre-wrap;
-}
-.hidden{display: none !important;
-}
-@media print{.no_Print, #audit-toolbar, .btn{display: none !important;
-}
-#audit-print-container{padding: 0;
-}
-}
-/* EOF ./plugins/audit2.css */
-
-
 </style>
 <script>
 <?php if (defined('APP_DEBUG') && APP_DEBUG): ?>const _t0 = performance.now();<?php endif; ?>
@@ -1292,6 +1132,7 @@ function view_objloc_mgmt(): void { view_team_nav(); ?>
 	<br>
 	<textarea name="description" placeholder="<?= __('ld_ph_desc') ?>" class="textarea-sm"></textarea><br>
 	<button type="submit" class="btn-sm btn-green"><?= __('g_btn_add') ?> / <?= __('g_btn_save') ?></button>
+	<button type="reset" class="btn-sm btn-silver"><?= __('g_btn_clear') ?></button>
 </form>
 <h3 class="h3-section"><?= __('ld_saved_title') ?></h3>
 <div id="details-list-container"></div>
@@ -1390,6 +1231,7 @@ const _tplTask = compileTpl(<?= json_encode( '<form class="card {{card_cls}}" on
 	<span class="hint" <?= html_hint(__('rules_full_weeks')) ?> >
 	<?= __('g_week') ?>
 	</span>
+<label><input type="checkbox" value="*">*</label><?php ?>
 	<?php foreach([1,2,3,4] as $w) echo "<label><input type='checkbox' value='$w'>$w</label>"; ?>
 	</div>
 
@@ -1709,10 +1551,26 @@ async function initRulesView() {
 	const ta = $('rules-textarea');
 	if (ta) ta.addEventListener('input', syncTextToVisual);
 
+
+
+
+
 	const vrContainer = $('visual-rules-container');
 	if (vrContainer) {
 		vrContainer.addEventListener('input', syncVisualToText);
-		vrContainer.addEventListener('change', syncVisualToText);
+vrContainer.addEventListener('change', e => {
+			// Mutual exclusivity: '*' unchecks 1-4; checking 1-4 unchecks '*'
+			if (e.target.closest('.vr-weeks')) {
+				const weeksDiv = e.target.closest('.vr-weeks');
+				if (e.target.value === '*' && e.target.checked) {
+					weeksDiv.querySelectorAll('input:not([value="*"])').forEach(cb => cb.checked = false);
+				} else if (e.target.value !== '*' && e.target.checked) {
+					const allCb = weeksDiv.querySelector('input[value="*"]');
+					if (allCb) allCb.checked = false;
+				}
+			}
+			syncVisualToText();
+		});
 		vrContainer.addEventListener('click', e => {
 			if (e.target.closest('.btn-del-vr')) {
 				e.target.closest('.visual-rule-row').remove();
@@ -1720,6 +1578,10 @@ async function initRulesView() {
 			}
 		});
 	}
+
+
+
+
 
 	await refreshRulesView();
 
@@ -2619,12 +2481,19 @@ function renderTeamTasks(groupedData, isMonth, containerId) {
 function populateDetails(title) {
 	if (!detailsCache || !detailsCache.length) return;
 	const f = $('details-form');
+	if (!f) return;
 	const match = detailsCache.find(d => d.title === title);
-	f.title.value = match?.title || '';
-	f.address.value = match?.address || '';
-	f.related_person.value = match?.related_person || '';
-	f.description.value = match?.description || '';
+	if (!match) return; // Prevents clearing form/title while typing new object
+	f.title.value = match.title;
+	f.address.value = match.address || '';
+	f.related_person.value = match.related_person || '';
+	f.description.value = match.description || '';
 }
+
+
+
+
+
 
 /** Upsert a location/object detail record. */
 async function saveDetails(e) {
@@ -2689,8 +2558,10 @@ function syncTextToVisual() {
 			cb.checked = daysStr.includes(cb.value);
 		});
 
+// Support '*' week toggle vs 1-4
+		const hasAll = (rule.weeks || '').includes('*');
 		row.querySelectorAll('.vr-weeks input').forEach(cb => {
-			cb.checked = (rule.weeks || '').includes(cb.value);
+			cb.checked = cb.value === '*' ? hasAll : (!hasAll && (rule.weeks || '').includes(cb.value));
 		});
 
 		row.querySelector('.vr-start').value = rule.start || '';
@@ -2832,475 +2703,3 @@ echo "<script src='$e'></script>";
 <?php } ?>
 </body>
 </html>
-
-
-
-/* included from ./plugins/audit2.js [[[*/
-<?php
-/* Plugin JS — PHP injects i18n keys into the shared i18n map that __() reads. */
-global $_aud_i18n, $langi;
-if (isset($_aud_i18n) && is_array($_aud_i18n)) {
-	$_flat = [];
-	foreach ($_aud_i18n as $k => $v) $_flat[$k] = $v[$langi] ?? ($v[0] ?? $k);
-	echo "Object.assign(i18n, " . json_encode($_flat, JSON_UNESCAPED_UNICODE) . ");\n";
-}
-?>
-/**
- * PLUGIN: audit2 — client side.
- * Tabs: runs | templates (admin) | report (admin) | access (admin) | run-detail
- * Draft: localStorage `audit_draft_${run_id}` → { results, ts }.
- * Written on every change, cleared on commit. PHP never sees drafts.
- */
-
-// ─── STATE
-let _auditIsAdmin	= false;
-let _auditCurrentUid = 0;
-let _auditTemplates  = [];
-
-// ─── DRAFT UTILS
-const _audLsKey = id => 'audit_draft_' + id;
-function _audLoadDraft(id) {
-	try { const o = JSON.parse(localStorage.getItem(_audLsKey(id))); return o && Array.isArray(o.results) ? o.results : null; }
-	catch { return null; }
-}
-function _audSaveDraft(id, results) {
-	try { localStorage.setItem(_audLsKey(id), JSON.stringify({ results, ts: Date.now() })); } catch {}
-}
-function _audClearDraft(id) { try { localStorage.removeItem(_audLsKey(id)); } catch {} }
-
-// ─── PANEL SWITCHER
-function _audShow(panelId) {
-	['audit-panel-runs','audit-panel-templates','audit-panel-report','audit-panel-access','audit-panel-run']
-		.forEach(id => { const el = $(id); if (el) el.classList.toggle('hidden', id !== panelId); });
-	document.querySelectorAll('#audit-toolbar a').forEach(a =>
-		a.classList.toggle('active', a.dataset.audTab === panelId.replace('audit-panel-', '')));
-}
-
-
-// ─── INIT
-
-async function initAuditView() {
-	const me = await apiCall('me');
-	if (!me) return;
-	_auditIsAdmin	= !!me.is_admin;
-	_auditCurrentUid = me.uid | 0;
-
-	if (_auditIsAdmin)
-		document.querySelectorAll('.aud-admin-only').forEach(el => el.classList.remove('hidden'));
-
-	document.querySelectorAll('#audit-toolbar a').forEach(a => {
-		a.addEventListener('click', e => {
-			e.preventDefault();
-			const tab = a.dataset.audTab;
-			if (tab === 'runs')	  { _audShow('audit-panel-runs');	  refreshAuditRuns(); }
-			if (tab === 'templates') { _audShow('audit-panel-templates'); refreshAuditTemplates(); }
-			if (tab === 'report')	{ _audShow('audit-panel-report');	refreshAuditReport(); }
-			if (tab === 'access')	{ _audShow('audit-panel-access');	refreshAuditAccess(); }
-		});
-	});
-
-	await refreshAuditDue();
-	await refreshAuditRuns();
-}
-
-
-// ─── DUE BANNER
-
-async function refreshAuditDue() {
-	const due	= await apiCall('audit_run/due');
-	const banner = $('audit-due-banner');
-	if (!banner) return;
-	if (!due || due.error) {
-		if (due && due.error === 'forbidden')
-			$('audit-shell').innerHTML = '<p>' + escHtml(__('aud_no_access')) + '</p>';
-		return;
-	}
-	if (!due.length) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
-	banner.classList.remove('hidden');
-	banner.innerHTML = '<div class="card card-secondary"><div class="card_header">' + escHtml(__('aud_due')) + '</div>' +
-		'<div class="card_body">' + due.map(d => {
-			const lbl = d.overdue ? __('aud_overdue') : __('aud_due');
-			const cls = d.overdue ? 'status-0' : 'status-1';
-			return '<div class="aud-due-row"><span class="' + cls + '">' + escHtml(lbl) + ':</span> ' +
-				'<b>' + escHtml(d.title) + '</b> ' +
-				'<button class="btn-sm btn-blue" onclick="auditStart(' + d.template_id + ')">' + escHtml(__('aud_start_new')) + '</button></div>';
-		}).join('') + '</div></div>';
-}
-
-async function auditStart(template_id) {
-	const res = await apiCall('audit_run/create', { template_id });
-	if (res && res.id) await openAuditRun(res.id);
-}
-
-
-// ─── RUNS LIST
-
-async function refreshAuditRuns() {
-	const panel = $('audit-panel-runs');
-	if (!panel) return;
-	panel.innerHTML = '<p>…</p>';
-	const data = await apiCall('audit_run');
-	const runs = Array.isArray(data) ? data : [];
-	if (!runs.length) { panel.innerHTML = '<p>' + escHtml(__('aud_no_runs')) + '</p>'; return; }
-	const rows = runs.map(r => {
-		const status = r.committed_at
-			? (r.has_issues ? '<span class="status-0">⚠ ' + escHtml(__('aud_issues')) + '</span>' : '<span class="status-2">✓</span>')
-			: '<span class="status-1">' + escHtml(__('aud_draft')) + '</span>';
-		const pct = r.total_count ? Math.round(100 * r.done_count / r.total_count) : 0;
-		return '<tr class="team-row" data-aud-run="' + r.id + '">' +
-			'<td><b>' + escHtml(r.template_title || '') + '</b><br>' +
-			'<small>' + escHtml(r.username || '') + ' · ' + escHtml(r.run_date) + '</small></td>' +
-			'<td>' + status + '<br><small>' + r.done_count + '/' + r.total_count + ' (' + pct + '%)</small></td>' +
-			'</tr>';
-	}).join('');
-	panel.innerHTML = '<div class="card"><div class="card_header">' + escHtml(__('aud_runs')) + '</div>' +
-		'<table role="presentation" class="card_body card_body--p10">' + rows + '</table></div>';
-	panel.querySelectorAll('[data-aud-run]').forEach(tr =>
-		tr.addEventListener('click', () => openAuditRun(+tr.dataset.audRun)));
-}
-
-
-// ─── RUN DETAIL
-
-async function openAuditRun(run_id) {
-	_audShow('audit-panel-run');
-	const panel = $('audit-panel-run');
-	panel.innerHTML = '<p>…</p>';
-	const res = await apiCall('audit_run', null, null, '', '', '&id=' + run_id);
-	if (!res || res.error) { panel.innerHTML = '<p>err</p>'; return; }
-
-	const isCommitted = !!res.committed_at;
-	const tpl		 = res.template || {};
-	const subtasks	= tpl.subtasks_ordered || [];
-
-	let state;
-	if (isCommitted) {
-		state = res.results.length ? res.results : subtasks.map(() => ({ done: 0, comment: '' }));
-	} else {
-		const draft = _audLoadDraft(run_id);
-		state = (draft && draft.length === subtasks.length) ? draft : subtasks.map(() => ({ done: 0, comment: '' }));
-	}
-
-	const hdr = '<div class="card_header card_header--flex">' +
-		'<a href="#" class="btn-sm btn-silver" id="aud-back">' + escHtml(__('aud_back')) + '</a>' +
-		'<b>' + escHtml(tpl.title || '') + '</b>' +
-		'<span class="t-user"><small>' + escHtml(res.run_date) + '</small></span></div>';
-
-	const rows = subtasks.map((s, idx) => {
-		const checked = state[idx] && state[idx].done ? 'checked' : '';
-		const comment = state[idx] ? state[idx].comment : '';
-		const dis	 = isCommitted ? 'disabled' : '';
-		return '<div class="aud-item">' +
-			'<label><input type="checkbox" data-aud-idx="' + idx + '" ' + checked + ' ' + dis + '> ' + escHtml(s.name) + '</label>' +
-			'<textarea data-aud-cmt="' + idx + '" placeholder="' + escHtml(__('aud_comment')) + '" ' + dis + '>' + escHtml(comment) + '</textarea>' +
-			'</div>';
-	}).join('');
-
-	let footer;
-	if (isCommitted) {
-		footer = '<p class="status-2"><i>' + escHtml(__('aud_read_only')) + '</i><br>' +
-			escHtml(__('aud_committed_at')) + ': ' + escHtml(res.committed_at || '') + '</p>' +
-			'<a class="btn-sm btn-silver no_Print" href="?view=audit_print&run_id=' + run_id + '" target="_blank">' + escHtml(__('aud_print')) + '</a>';
-	} else {
-		footer = '<p id="aud-draft-msg" class="hint"></p>' +
-			'<button class="save_ta btn-green" id="aud-commit-btn">' + escHtml(__('aud_commit')) + '</button>';
-	}
-
-	panel.innerHTML = '<form class="card" onsubmit="event.preventDefault()">' + hdr +
-		'<div class="card_body">' + rows + footer + '</div></form>';
-
-	$('aud-back').addEventListener('click', e => {
-		e.preventDefault();
-		_audShow('audit-panel-runs');
-		refreshAuditRuns();
-	});
-
-	if (!isCommitted) {
-		panel.querySelectorAll('[data-aud-idx]').forEach(cb =>
-			cb.addEventListener('change', () => _audPersistDraft(run_id, state, panel)));
-		panel.querySelectorAll('[data-aud-cmt]').forEach(ta =>
-			ta.addEventListener('input', () => _audPersistDraft(run_id, state, panel)));
-		$('aud-commit-btn').addEventListener('click', ev => commitAuditRun(ev, run_id, state));
-	}
-}
-
-function _audPersistDraft(run_id, state, panel) {
-	panel.querySelectorAll('[data-aud-idx]').forEach(cb => {
-		const i = +cb.dataset.audIdx;
-		state[i] = state[i] || { done: 0, comment: '' };
-		state[i].done = cb.checked ? 1 : 0;
-	});
-	panel.querySelectorAll('[data-aud-cmt]').forEach(ta => {
-		const i = +ta.dataset.audCmt;
-		state[i] = state[i] || { done: 0, comment: '' };
-		state[i].comment = ta.value;
-	});
-	_audSaveDraft(run_id, state);
-	const msg = $('aud-draft-msg');
-	if (msg) msg.textContent = '✓ ' + __('aud_saved_locally');
-}
-
-async function commitAuditRun(ev, run_id, state) {
-	const btn = ev.currentTarget;
-	const res = await apiCall('audit_commit', { run_id, results: state }, btn, __('g_btn_wait'), __('g_btn_retry'));
-	if (!res) return;
-	_audClearDraft(run_id);
-	btnCooldown(btn, __('g_btn_done'), 1500);
-	await refreshAuditRuns();
-	await refreshAuditDue();
-	await openAuditRun(run_id);
-}
-
-
-// ─── TEMPLATES (admin)
-
-async function refreshAuditTemplates() {
-	const panel = $('audit-panel-templates');
-	if (!panel) return;
-	panel.innerHTML = '<p>…</p>';
-	const data = await apiCall('audit_template');
-	_auditTemplates = Array.isArray(data) ? data : [];
-	panel.innerHTML = _audTemplateFormHtml(null) +
-		(_auditTemplates.length
-			? _auditTemplates.map(t => _audTemplateCardHtml(t)).join('')
-			: '<p>' + escHtml(__('aud_no_templates')) + '</p>');
-	_audBindTemplateForms(panel);
-}
-
-function _audTemplateFormHtml(t) {
-	const id	   = t ? t.id : '';
-	const interval = t ? t.interval : 'week_end';
-	const active   = t ? t.active : 1;
-	const intOpts  = [['task_done', __('aud_int_task_done')], ['week_end', __('aud_int_week_end')], ['month_end', __('aud_int_month_end')]]
-		.map(([v, l]) => '<option value="' + v + '"' + (interval === v ? ' selected' : '') + '>' + escHtml(l) + '</option>').join('');
-	const subRows  = t ? t.subtasks.map((s, i) => _audSubRowHtml(s, i)).join('') : '';
-	const header   = t ? (__('aud_templates') + ': ' + t.title) : __('aud_new_template');
-	const delBtn   = t ? '<button type="button" class="btn-sm btn-red btn-compact" data-aud-del="' + id + '">' + escHtml(__('aud_delete')) + '</button>' : '';
-	return '<form class="card aud-tpl-form" data-aud-tpl="' + id + '">' +
-		'<div class="card_header">' + escHtml(header) + '</div>' +
-		'<div class="card_body">' +
-		'<input type="hidden" name="id" value="' + id + '">' +
-		'<label>' + escHtml(__('aud_title')) + '<br><input type="text" name="title" value="' + (t ? escHtml(t.title) : '') + '" required></label><br>' +
-		'<label>' + escHtml(__('aud_target')) + '<br><input type="text" name="target" value="' + (t && t.target ? escHtml(t.target) : '') + '" placeholder="' + escHtml(__('aud_target_any')) + '"></label><br>' +
-		'<label>' + escHtml(__('aud_interval')) + '<br><select name="interval">' + intOpts + '</select></label><br>' +
-		'<label><input type="checkbox" name="active" value="1"' + (active ? ' checked' : '') + '> ' + escHtml(__('aud_active')) + '</label>' +
-		'<div class="aud-sub-hdr"><b>' + escHtml(__('aud_subtasks')) + '</b> ' +
-		'<button type="button" class="btn-sm btn-silver btn-compact" data-aud-add-sub>' + escHtml(__('aud_add_subtask')) + '</button></div>' +
-		'<div class="aud-subtasks">' + subRows + '</div>' +
-		'<button type="submit" class="save_ta btn-green">' + escHtml(__('aud_save')) + '</button> ' + delBtn +
-		'</div></form>';
-}
-
-function _audSubRowHtml(name, i) {
-	return '<div class="aud-sub-row">' +
-		'<button type="button" class="btn-sm btn-silver btn-compact" data-aud-sub-up>↑</button>' +
-		'<button type="button" class="btn-sm btn-silver btn-compact" data-aud-sub-dn>↓</button>' +
-		'<input type="text" name="subtask[]" value="' + escHtml(name || '') + '" required>' +
-		'<button type="button" class="btn-sm btn-red btn-compact" data-aud-sub-del>✖</button>' +
-		'</div>';
-}
-
-function _audTemplateCardHtml(t) {
-	const statusCls = t.active ? 'status-2' : 'status-0';
-	const statusLbl = t.active ? __('aud_active') : __('aud_disabled');
-	return '<details class="card aud-tpl-card">' +
-		'<summary class="card_header"><b>' + escHtml(t.title) + '</b> ' +
-		'<small>· ' + escHtml(t.interval) + (t.target ? ' · ' + escHtml(t.target) : '') + '</small> ' +
-		'<span class="' + statusCls + '">' + escHtml(statusLbl) + '</span></summary>' +
-		'<div class="card_body"><ul class="aud-preview-list">' + t.subtasks.map(s => '<li>' + escHtml(s) + '</li>').join('') + '</ul>' +
-		'<button type="button" class="btn-sm btn-blue btn-compact" data-aud-edit="' + t.id + '">✎</button></div></details>';
-}
-
-function _audBindTemplateForms(panel) {
-	panel.querySelectorAll('.aud-tpl-form').forEach(form => {
-		form.addEventListener('submit', e => { e.preventDefault(); saveAuditTemplate(form); });
-		form.querySelector('[data-aud-add-sub]')?.addEventListener('click', () => {
-			const host = form.querySelector('.aud-subtasks');
-			const div  = document.createElement('div');
-			div.innerHTML = _audSubRowHtml('', host.children.length);
-			host.appendChild(div.firstChild);
-			_audBindSubRows(form);
-		});
-		form.querySelector('[data-aud-del]')?.addEventListener('click', function() { disableAuditTemplate(+this.dataset.audDel); });
-		_audBindSubRows(form);
-	});
-	panel.querySelectorAll('[data-aud-edit]').forEach(btn => {
-		btn.addEventListener('click', () => {
-			const t = _auditTemplates.find(x => x.id === +btn.dataset.audEdit);
-			if (!t) return;
-			const wrap = document.createElement('div');
-			wrap.innerHTML = _audTemplateFormHtml(t);
-			btn.closest('details').replaceWith(wrap.firstChild);
-			_audBindTemplateForms(panel);
-		});
-	});
-}
-
-function _audBindSubRows(form) {
-	form.querySelectorAll('.aud-sub-row').forEach(row => {
-		row.querySelector('[data-aud-sub-del]')?.addEventListener('click', () => row.remove());
-		row.querySelector('[data-aud-sub-up]')?.addEventListener('click', () => { const p = row.previousElementSibling; if (p) row.parentNode.insertBefore(row, p); });
-		row.querySelector('[data-aud-sub-dn]')?.addEventListener('click', () => { const n = row.nextElementSibling;	 if (n) row.parentNode.insertBefore(n, row); });
-	});
-}
-
-async function saveAuditTemplate(form) {
-	const fd	   = new FormData(form);
-	const subtasks = [...form.querySelectorAll('input[name="subtask[]"]')].map(i => i.value.trim()).filter(Boolean);
-	const payload  = {
-		id: fd.get('id') || '', title: fd.get('title') || '', target: fd.get('target') || '',
-		interval: fd.get('interval') || 'week_end',
-		active: form.querySelector('input[name="active"]').checked ? 1 : 0,
-		subtasks,
-	};
-	const btn = form.querySelector('button[type="submit"]');
-	const res = await apiCall('audit_template', payload, btn, __('g_btn_wait'), __('g_btn_retry'));
-	if (!res) return;
-	btnCooldown(btn, __('g_btn_done'), 1500);
-	await refreshAuditTemplates();
-}
-
-async function disableAuditTemplate(id) {
-	if (!confirm('?')) return;
-	const res = await apiCall('audit_template/delete', { id });
-	if (res) await refreshAuditTemplates();
-}
-
-
-// ─── REPORT (admin)
-
-async function refreshAuditReport() {
-	const panel = $('audit-panel-report');
-	if (!panel) return;
-	panel.innerHTML = '<p>…</p>';
-	const data = await apiCall('audit_report');
-	if (!data) { panel.innerHTML = '<p>err</p>'; return; }
-	const tplBlocks = (data.by_template || []).map(t =>
-		'<div class="card"><div class="card_header"><b>' + escHtml(t.template_title) + '</b> — ' + escHtml(__('aud_subtask_passrate')) + '</div>' +
-		'<table role="presentation" class="card_body card_body--p10">' +
-		t.items.map(it => '<tr><td>' + escHtml(it.name) + '</td><td><b>' + it.rate + '%</b></td><td><small>' + it.done + '/' + it.total + '</small></td></tr>').join('') +
-		'</table></div>'
-	).join('');
-	const workerRows = (data.by_worker || []).map(w => {
-		const rate = w.runs ? Math.round(100 * (w.runs - w.issues) / w.runs) : 0;
-		return '<tr><td>' + escHtml(w.username || '') + '</td><td><b>' + rate + '%</b></td><td><small>' + (w.runs - w.issues) + '/' + w.runs + '</small></td></tr>';
-	}).join('');
-	panel.innerHTML = tplBlocks +
-		'<div class="card"><div class="card_header"><b>' + escHtml(__('aud_worker_compl')) + '</b></div>' +
-		'<table role="presentation" class="card_body card_body--p10">' + workerRows + '</table></div>';
-}
-
-
-// ─── ACCESS (admin)
-
-async function refreshAuditAccess() {
-	const panel = $('audit-panel-access');
-	if (!panel) return;
-	panel.innerHTML = '<p>…</p>';
-	const data = await apiCall('audit_access');
-	if (!data) { panel.innerHTML = '<p>err</p>'; return; }
-	const rows = data.map(u =>
-		'<tr><td>' + escHtml(u.real_name || u.username) + '</td>' +
-		'<td><input type="checkbox" data-uid="' + u.id + '"' + (u.has_access ? ' checked' : '') + '></td></tr>'
-	).join('');
-	panel.innerHTML = '<div class="card"><div class="card_header"><b>' + escHtml(__('aud_access_title')) + '</b></div>' +
-		'<table role="presentation" class="card_body card_body--p10">' + rows + '</table></div>';
-	panel.querySelectorAll('[data-uid]').forEach(cb =>
-		cb.addEventListener('change', () => apiCall('audit_access', { user_id: +cb.dataset.uid, grant: cb.checked ? 1 : 0 })));
-}
-
-
-// ─── TASK DONE HOOK
-
-window.auditOnTaskDone = async function(task_id) {
-	try {
-		const res = await apiCall('audit_run/check_task', { task_id });
-		if (res && res.run_id) refreshAuditDue();
-	} catch {}
-};
-
-
-// ─── PRINT VIEW
-
-async function initAuditPrintView() {
-	const run_id = new URLSearchParams(location.search).get('run_id') || '';
-	if (!run_id) return;
-	const data = await apiGet('audit_run/print', '&run_id=' + encodeURIComponent(run_id));
-	if (!data || data.error) return;
-	const container = $('audit-print-container');
-	const pageTpl   = $('print-page-template');
-	if (!container || !pageTpl) return;
-
-	const page		= pageTpl.content.cloneNode(true);
-	const auditor	 = data.auditor || {};
-	const auditorName = auditor.real_name || auditor.username || '';
-	const tpl		 = data.template || {};
-	const run		 = data.run || {};
-	const runDate	 = run.run_date || data.today || '';
-
-	page.querySelector('.p-heading').textContent = (tpl.title || '') + ' | ' + runDate;
-	const pageDiv = page.querySelector('.worker-page');
-
-	const orgHeader = pageDiv.querySelector('.print-org-header');
-	if (orgHeader && data.org && Object.keys(data.org).length) {
-		const parts = ['org_name','org_address','org_phone','org_email','org_person']
-			.filter(k => data.org[k])
-			.map(k => k === 'org_name' ? '<strong>' + escHtml(data.org[k]) + '</strong>' : escHtml(data.org[k]));
-		orgHeader.innerHTML = parts.join(' · ');
-	}
-
-	const total  = Array.isArray(run.results) ? run.results.length : 0;
-	let   passed = 0;
-	if (Array.isArray(run.results)) run.results.forEach(r => { if (r && r.done) passed++; });
-
-	const meta = document.createElement('div');
-	meta.className = 'aud-print-meta';
-	meta.innerHTML =
-		'<div><b>' + escHtml(__('aud_print_auditor')) + ':</b> ' + escHtml(auditorName) +
-			(auditor.contact ? ' <small>' + escHtml(auditor.contact) + '</small>' : '') + '</div>' +
-		'<div><b>' + escHtml(__('aud_print_date')) + ':</b> ' + escHtml(runDate) + '</div>' +
-		'<div><b>' + escHtml(__('aud_print_committed')) + ':</b> ' + escHtml(run.committed_at || '') + '</div>' +
-		'<div><b>' + escHtml(__('aud_print_summary')) + ':</b> ' + escHtml(passed + '/' + total) + '</div>';
-	pageDiv.appendChild(meta);
-
-	const subs	= (tpl.subtasks_ordered || []).map(s => s.name);
-	const results = Array.isArray(run.results) ? run.results : [];
-	const table   = document.createElement('table');
-	table.className = 'aud-print-list';
-	table.setAttribute('role', 'presentation');
-	table.innerHTML = subs.map((name, i) => {
-		const r   = results[i] || { done: 0, comment: '' };
-		const cls = r.done ? 'status-2' : 'status-0';
-		return '<tr class="aud-print-item">' +
-			'<td class="aud-print-check ' + cls + '">' + escHtml(r.done ? __('aud_print_pass') : __('aud_print_fail')) + '</td>' +
-			'<td class="aud-print-name">' + escHtml(name) + '</td>' +
-			'<td class="aud-print-comment">' + (r.comment ? escHtml(r.comment) : '') + '</td></tr>';
-	}).join('');
-	pageDiv.appendChild(table);
-
-	const sig = document.createElement('div');
-	sig.className = 'signature-row';
-	sig.innerHTML =
-		'<div class="signature-col">' +
-		'<span class="sig-worker">' + escHtml(__('aud_print_auditor')) + ': ' + escHtml(auditorName) + '</span><br>' +
-		'<span class="sig-worker-contact">' + escHtml(auditor.contact || '') + '</span>' +
-		'<div class="signature-line">' + escHtml(__('print_signature_line')) + '</div></div>' +
-		'<div class="signature-col"><span class="sig-contact"></span>' +
-		'<div class="signature-line">' + escHtml(__('print_signature_line')) + '</div></div>';
-	pageDiv.appendChild(sig);
-
-	container.appendChild(page);
-	document.body.classList.add('print-view-active');
-	window.print();
-}
-
-
-// ─── DISPATCH
-document.addEventListener('DOMContentLoaded', () => {
-	if (typeof CURRENT_VIEW === 'undefined') return;
-	if (CURRENT_VIEW === 'audit')			initAuditView();
-	else if (CURRENT_VIEW === 'audit_print') initAuditPrintView();
-});
-
-/* EOF ./plugins/audit2.js */
-
