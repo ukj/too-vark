@@ -134,6 +134,17 @@ if (defined('APP_DEBUG') && APP_DEBUG && function_exists('timer_log'))timer_log(
 
 
 
+/** Used in two places: the initial seed and users POST.
+ * Returns rowCount: 1 if inserted, 0 if username already exists (IGNORE).
+ * Relies on SQLite PDO returning 0 for ignored inserts — verified behaviour. */
+function insert_user(PDO $pdo, string $username, string $password, string $real_name='', string $contact='',$force_pw_change=0): int {
+	$stmt = $pdo->prepare("INSERT OR IGNORE INTO users (username, password,real_name, contact, force_password_change) VALUES (?,?,?,?,?)");
+	$stmt->execute([$username, password_hash($password, PASSWORD_DEFAULT),$real_name, $contact, $force_pw_change]);
+	// TODO: relying on rowCount() for INSERT OR IGNORE is SQLite-driver-dependent behavior.
+	return $stmt->rowCount();
+}
+
+
 
 function known_titles(PDO $pdo): array {
 // TODO: SELECT title FROM task_details UNION SELECT title FROM tasks ORDER BY titl

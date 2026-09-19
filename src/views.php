@@ -244,6 +244,7 @@ function view_objloc_mgmt(): void {
 	<br>
 	<textarea name="description" placeholder="<?= __('ld_ph_desc') ?>" class="textarea-sm"></textarea><br>
 	<button type="submit" class="btn-sm btn-green"><?= __('g_btn_add') ?> / <?= __('g_btn_save') ?></button>
+	<button type="reset" class="btn-sm btn-silver"><?= __('g_btn_clear') ?></button>
 </form>
 <h3 class="h3-section"><?= __('ld_saved_title') ?></h3>
 <div id="details-list-container"></div>

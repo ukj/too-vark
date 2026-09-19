@@ -600,4 +600,806 @@ function populateUserForm(userId) {
 	$('user-pass-hint').classList.remove('hidden');
 	$('user-form-top').scrollIntoView({behavior: 'smooth'});
 }
-/** Workaround: form.id collides with the DOM e
+/** Workaround: form.id collides with the DOM element's own id. */
+function initUserFormIdHelper() {
+	const f = $('user-mgmt-form');
+	if (f) f.id_field_value_set = function(v) { f.querySelector('[name=id]').value = v; };
+}
+
+
+/** Save user: create or update. Surgical DOM + state update. */
+async function saveUser(e) {
+	e.preventDefault();
+	const f = e.target, btn = f.querySelector('button[type=submit]');
+	const origText = btn.textContent;
+	const editId = f.querySelector('[name=id]').value;
+	const payload = {
+		username: f.username.value.trim(),
+		password: f.password.value,
+		real_name: f.real_name.value.trim(),
+		contact: f.contact.value.trim()
+	};
+
+	let res;
+	if (editId) {
+		payload.id = editId;
+		res = await apiCall('users/update', payload, btn, __('g_btn_wait'), __('g_btn_retry'));
+		if (res && res.msg === 'ok') {
+// state update
+			const idx = usersCache.findIndex(u => u.id == editId);
+			if (idx !== -1) Object.assign(usersCache[idx], { username: res.username, real_name: res.real_name, contact: res.contact });
+// DOM update
+			const card = document.querySelector('.user-row[data-id="' + editId + '"]');
+			if (card) {
+				card.querySelector('.u-username').textContent = res.username;
+				let rn = card.querySelector('.u-realname');
+				if (res.real_name) {
+					if (!rn) { rn = document.createElement('span'); rn.className = 'u-realname'; card.querySelector('.u-username').insertAdjacentElement('afterend', rn); rn.insertAdjacentHTML('beforebegin', '<br>'); }
+					rn.textContent = res.real_name;
+				} else if (rn) rn.remove();
+				let ct = card.querySelector('.u-contact');
+				if (res.contact) {
+					if (!ct) { ct = document.createElement('span'); ct.className = 'u-contact'; card.appendChild(ct); }
+					ct.textContent = res.contact;
+				} else if (ct) ct.remove();
+				flashRow(card);
+			}
+		}
+	} else {
+		if (!f.password.value.trim()) { alert(__('g_pass')); btn.disabled = false; return; }
+		res = await apiCall('users', payload, btn, __('g_btn_wait'), __('g_btn_retry'));
+		if (res && res.msg === 'ok') {
+// Add to cache + re-render to get sorted position
+			usersCache.push({ id: res.id, username: res.username, real_name: res.real_name, contact: res.contact });
+			usersCache.sort((a, b) => a.username.localeCompare(b.username));
+			renderUserRows(usersCache);
+			const newCard = document.querySelector('.user-row[data-id="' + res.id + '"]');
+			if (newCard) {
+				if (newCard.dataset.lazy) _fillUserCard(newCard, usersCache.find(x => x.id == res.id));
+				flashRow(newCard);
+			}
+		}
+	}
+	if (res && res.msg === 'ok') {
+		f.reset();
+		btnCooldown(btn, origText, 2000);
+	}
+}
+
+
+/** Delete a user. Surgical removal from cache + DOM. */
+async function deleteUser(e, userId) {
+	e.stopPropagation();
+	const u = usersCache.find(x => x.id == userId);
+	if (!confirm(__('um_del_confirm') + '\n\n' + (u ? u.username : ''))) return;
+	const res = await apiCall('users/delete', { id: userId });
+	if (res && res.msg === 'ok') {
+		usersCache = usersCache.filter(x => x.id != userId);
+		const card = document.querySelector('.user-row[data-id="' + userId + '"]');
+		if (card) card.remove();
+
+		const f = $('user-mgmt-form');
+		if (f && f.querySelector('[name=id]').value == userId) f.reset();
+	}
+}
+
+
+/** Year-end archival: rename tasks table. */
+async function archiveYear(btn) {
+	if (btn && btn.disabled) return;
+	if (!confirm(__('um_Archive_year'))) return;
+	const res = await apiCall('archive_year', {});
+	if (res && res.msg === 'ok') await refreshTeamMgmt();
+}
+
+
+/**
+ * Render location detail cards as lazy shells.
+ * Click delegation handled in initObjLocMgmt() — this only builds DOM.
+ */
+let _detailObs = null;
+
+/** Fill a single detail card's innerHTML from detail data. */
+function _fillDetailCard(card, det) {
+	card.innerHTML = '<button type="button" class="btn-icon btn-del-detail">&times;</button>'
+		+ '<strong class="d-title">' + escHtml(det.title) + '</strong>'
+		+ (det.address ? '<br><span class="d-address">' + escHtml(det.address) + '</span>' : '')
+		+ (det.related_person ? '<br><span class="d-contact">' + escHtml(__('ld_ph_contact') + ': ' + det.related_person) + '</span>' : '')
+		+ (det.description ? '<div class="d-descr">' + escHtml(det.description) + '</div>' : '');
+}
+
+function renderDetailCards(details) {
+	if (_detailObs) { _detailObs.disconnect(); _detailObs = null; }
+	_detailObs = lazyRender('details-list-container', details, 'title',
+		d => d.title,
+		d => '<div class="card loc_det" data-title="' + escHtml(d.title) + '" data-lazy="1"></div>',
+		_fillDetailCard,
+		__('ld_db_empty')
+	);
+}
+
+
+// ─── CONFIG KEY-VALUE STORE
+
+const CFG_EXAMPLES = ['org_name', 'org_address', 'org_phone', 'org_email', 'org_person'];
+
+/** Render config rows with inline edit + delete. */
+function renderConfig(rows) {
+	const container = $('config-rows');
+	if (!container) return;
+	container.innerHTML = '';
+	const tpl = $('config-row-template');
+
+	rows.forEach(r => {
+		const clone = tpl.content.cloneNode(true);
+		const row = clone.querySelector('.conf_row');
+		row.dataset.cfgKey = r.key;
+		clone.querySelector('.c-key').textContent = r.key;
+		const input = clone.querySelector('.c-val');
+		input.value = r.val;
+		input.onchange = function() { saveConfig(r.key, this.value); };
+		clone.querySelector('.btn-del-cfg').onclick = function() { deleteConfig(r.key); };
+		container.appendChild(clone);
+	});
+
+	const existing = rows.map(r => r.key);
+	const missing = CFG_EXAMPLES.filter(k => !existing.includes(k));
+	if (missing.length) container.insertAdjacentHTML('beforeend',
+		'<div class="conf_hint">💡 ' + missing.join(', ') + '</div>');
+}
+
+/** Save a config key-value pair. Called from + button or inline edit.
+ * Refreshes via standalone ?api=config (lightweight) — not the bundled details endpoint. */
+async function saveConfig(key, val) {
+	if (!key) {
+		const kEl = $('cfg-new-key');
+		const vEl = $('cfg-new-val');
+		key = kEl.value.trim(); val = vEl.value.trim();
+		if (!key) return;
+	}
+	const res = await apiCall('config', { key, val });
+	if (res && res.msg === 'ok') {
+		const kEl = $('cfg-new-key');
+		const vEl = $('cfg-new-val');
+		if (kEl) kEl.value = '';
+		if (vEl) vEl.value = '';
+		const cfgData = await apiGet('config');
+		if (cfgData) renderConfig(cfgData);
+	}
+}
+
+/** Delete a config key. Refreshes via standalone ?api=config. */
+async function deleteConfig(key) {
+	if (!confirm(__('g_del_confirm') + '\n\n' + key)) return;
+	const res = await apiCall('config/delete', { key });
+	if (res && res.msg === 'ok') {
+		const cfgData = await apiGet('config');
+		if (cfgData) renderConfig(cfgData);
+	}
+}
+
+
+// ─── OBJECT / LOCATION MANAGEMENT VIEW
+
+/** Bind events once — detail card delegation, then fetch+render. */
+async function initObjLocMgmt() {
+// Delegated click handler for detail cards (bound once, survives re-renders)
+	$('details-list-container')?.addEventListener('click', function(e) {
+		const card = e.target.closest('[data-title]');
+		if (!card) return;
+		if (e.target.closest('.btn-del-detail')) {
+			deleteDetails(e, card.dataset.title);
+		} else {
+			populateDetails(card.dataset.title);
+			$('details-form')?.scrollIntoView({behavior: 'smooth'});
+					
+		}
+	});
+
+	await refreshObjLocMgmt();
+}
+
+
+/** Shared: populate details cache + datalists from API response. */
+function _applyDetailsData(data) {
+	detailsCache = data.details || [];
+	fillDatalist('detail-titles', detailsCache.map(d => d.title));
+	fillDatalist('known-addresses', data.known_addresses || []);
+	fillDatalist('known-contacts', data.known_contacts || []);
+}
+
+/** Fetch details + render cards. No user/DB/archive management. */
+async function refreshObjLocMgmt() {
+	const data = await apiGet('details');
+	if (!data) return;
+	_applyDetailsData(data);
+	renderDetailCards(detailsCache);
+}
+
+
+// ─── PRINT VIEW
+
+/** Fetch print data and render work sheets, then trigger browser print dialog. */
+async function initPrintView() {
+	const taskId = new URLSearchParams(location.search).get('task_id') || '';
+	const params = taskId ? '&task_id=' + taskId : '';
+	const data = await apiGet('tasks/print', params);
+	if (!data) return;
+
+	const container = $('print-container');
+	if (!container) return;
+
+	const pageTpl = $('print-page-template');
+	const taskTpl = $('print-task-template');
+
+	if (!data.print_data || !Object.keys(data.print_data).length) {
+		const page = pageTpl.content.cloneNode(true);
+		page.querySelector('.p-heading').textContent = __('no_tasks_today');
+		container.appendChild(page);
+		return;
+	}
+
+	for (const [wn, tasks] of Object.entries(data.print_data)) {
+		const page = pageTpl.content.cloneNode(true);
+		const dt = tasks[0]?.task_date || data.today;
+		page.querySelector('.p-heading').textContent = wn + ' | ' + dt;
+		const pageDiv = page.querySelector('.worker-page');
+
+// Org header from config
+const orgHeader = pageDiv.querySelector('.print-org-header');
+		if (orgHeader && data.org && Object.keys(data.org).length) {
+const orgKeys = ['org_name','org_address','org_phone','org_email','org_person'];
+const parts = orgKeys
+	.filter(k => data.org[k])
+	.map(k => k === 'org_name' ? '<strong>'+escHtml(data.org[k])+'</strong>' : escHtml(data.org[k]));
+			orgHeader.innerHTML = parts.join(' · ');
+		}
+
+		const workerContact = tasks[0]?.user_contact || '';
+
+		tasks.forEach(tk => {
+			const box = taskTpl.content.cloneNode(true);
+			box.querySelector('.task-time').textContent = tk.start_time + ' - ' + tk.end_time;
+			box.querySelector('.task-title').textContent = tk.title;
+
+			const meta = box.querySelector('.task-meta');
+			if (tk.address) meta.textContent = tk.address;
+			else meta.remove();
+
+			const descr = box.querySelector('.task-descr');
+			if (tk.description || tk.notes) descr.textContent = [tk.description, tk.notes].filter(Boolean).join('\n');
+			else descr.remove();
+
+			box.querySelector('.sig-worker').textContent = __('g_worker') + ': ' + wn;
+			const sigWC = box.querySelector('.sig-worker-contact');
+			if (sigWC) sigWC.textContent = workerContact || '';
+			box.querySelector('.sig-contact').textContent = __('ld_ph_contact') + ': ' + (tk.related_person || '');
+
+			pageDiv.appendChild(box);
+		});
+		container.appendChild(page);
+	}
+
+	document.body.classList.add('print-view-active');
+	window.print();
+}
+
+
+// ─── SHARED: Task Save (worker form + admin form) ───
+
+/** Scroll to a row and flash-highlight it. */
+function flashRow(row, block = 'center') {
+	if (!row) return;
+	row.scrollIntoView({ behavior: 'smooth', block });
+	row.classList.add('highlight-flash');
+	setTimeout(() => row.classList.remove('highlight-flash'), 1500);
+}
+/** falls back to nearest future date. Eagerly fills lazy shells before scrolling. */
+function scrollToToday(containerId) {
+	const container = $(containerId);
+	if (!container) return;
+	const today = new Date().toISOString().slice(0, 10);
+	const todayYM = today.slice(0, 7);
+	const displayedYM = CURRENT_YM || todayYM;
+
+	// Wrong month → navigate to today's month, hash triggers scroll after reload
+	if (displayedYM !== todayYM) {
+		const uid_param = new URLSearchParams(location.search).get('user_id') || '';
+		const view = CURRENT_VIEW || 'rules';
+		location.href = '?view=' + view + '&ym=' + todayYM + (uid_param ? '&user_id=' + uid_param : '') + '#today';
+		return;
+	}
+
+	let target = container.querySelector('[data-date="' + today + '"]');
+	if (!target) {
+		for (const el of container.querySelectorAll('[data-date]')) {
+			if (el.dataset.date >= today) { target = el; break; }
+		}
+	}
+	if (!target) return;
+
+	// Eager fill: if target is still lazy, populate rows before scroll
+	if (target.dataset.lazy) {
+		const src = [teamData, rulesData].find(s => s?.grouped?.[target.dataset.date]);
+		if (src) {
+			const tbl = target.querySelector('.card_body--p10');
+			if (tbl) tbl.innerHTML = _buildRows(src.grouped[target.dataset.date]);
+			target.removeAttribute('data-lazy');
+			if (_lazyObs) _lazyObs.unobserve(target);
+		}
+	}
+
+	flashRow(target, 'start');
+}
+
+
+
+
+/**
+ * Handle task save from either worker-task-form or manager-task-form.
+ * Manager form: new task → tasks/batch (multi-worker), edit → tasks/save (single).
+ * Worker form: always tasks/save.
+ *
+ * Saves a task from either the Manager or Worker form.
+ * - Edits: Surgically updates the DOM and scrolls to it (Zero-flicker).
+ * - Inserts: Refreshes the view, finds the new title, and scrolls to it.
+ */
+async function saveTaskUI(e) {
+	e.preventDefault();
+	
+	const form = e.target;
+	const btnSubmit = form.querySelector('button[type="submit"]');
+	const origBtnText = btnSubmit.textContent;
+	
+// UI Feedback (prevent double-clicks)
+	btnSubmit.disabled = true;
+	btnSubmit.textContent = __('g_btn_wait');
+
+	try {
+		const formData = new FormData(form);
+		const data = Object.fromEntries(formData.entries());
+
+// Handle multiple worker selection (Batch assignment in Team View)
+		const workerSelect = form.querySelector('#add-workers-select');
+		let isBatch = false;
+		if (workerSelect && workerSelect.multiple) {
+			const selected = Array.from(workerSelect.selectedOptions).map(o => o.value).filter(v => v);
+			if (selected.length > 0) {
+				data.worker_ids = selected;
+				isBatch = selected.length > 1;
+			}
+		}
+
+		const endpoint = isBatch ? 'tasks/batch' : 'tasks/save';
+		const res = await apiCall(endpoint, data);
+		if (!res) { btnSubmit.textContent = origBtnText; btnSubmit.disabled = false; return; }
+
+// Clear form early so it feels fast
+		form.reset();
+		form.querySelector('[name=id]').value = '';
+
+// SURGICAL DOM UPDATE (Edit Mode)
+		if (data.id && !isBatch) {
+			const row = document.querySelector(`.team-row[data-id="${data.id}"]`);
+			if (row) {
+// Update primary row
+				const titleEl = row.querySelector('.t-title');
+				const timeEl = row.querySelector('.t-time');
+				if (titleEl) titleEl.textContent = data.title;
+				if (timeEl) timeEl.textContent = `${data.start_time || ''} - ${data.end_time || ''}`;
+
+// Update Status text + CSS class
+				const statusEl = row.querySelector('.t-status');
+				if (statusEl) {
+					statusEl.classList.remove('status-0', 'status-1', 'status-2');
+					statusEl.classList.add('status-' + data.status);
+					statusEl.textContent = __('status_' + data.status);
+				}
+
+// Update Notes
+				const notesEl = row.querySelector('.t-notes') || (row.nextElementSibling && row.nextElementSibling.querySelector('.t-notes'));
+				if (notesEl) notesEl.textContent = data.notes || '';
+				flashRow(row);
+
+// UPDATE UNDERLYING JAVASCRIPT STATE
+// Mutating cached data guarantees the form is filled with fresh data
+		[teamData, rulesData].forEach(src => {
+			if (src?.grouped) for (const key in src.grouped) {
+				const task = src.grouped[key].find(t => t.id == data.id);
+				if (task) {
+					Object.assign(task, data);
+					task.status_text = __('status_' + data.status);
+				}
+			}
+		});	}
+	}
+
+
+// FULL REFRESH (New Tasks or Batch Mode)
+		else {
+	if (typeof CURRENT_VIEW !== 'undefined') {
+	if (CURRENT_VIEW === 'team' && typeof initTeamView === 'function') await initTeamView();
+	else if (CURRENT_VIEW === 'rules' && typeof initRulesView === 'function') await initRulesView();
+			}
+
+// Give the DOM a moment to render, then find and scroll to the new item
+		setTimeout(() => {
+			for (let el of document.querySelectorAll('.t-title')) {
+				if (el.textContent === data.title) {
+					flashRow(el.closest('.team-row'));
+					break;
+				}
+			}
+		}, 150); }
+
+// Success Feedback on Button
+		btnSubmit.textContent = __('g_btn_done');
+		setTimeout(() => {
+			btnSubmit.textContent = origBtnText;
+			btnSubmit.disabled = false;
+		}, 1000);
+
+	} catch (err) {
+		console.error("Save Error:", err);
+		alert(err.message || 
+		__('g_err_conn'));
+		btnSubmit.textContent = origBtnText;
+		btnSubmit.disabled = false;
+	}
+}
+
+
+// ─── SHARED: Team Task Renderer
+
+/** ISO 8601 week number from 'YYYY-MM-DD' string. */
+function isoWeek(dateStr) {
+	const d = new Date(dateStr + 'T12:00:00');
+	d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+	const jan4 = new Date(d.getFullYear(), 0, 4);
+	return 1 + Math.round(((d - jan4) / 86400000 - 3 + (jan4.getDay() + 6) % 7) / 7);
+}
+
+
+/**
+ * Render grouped task data into a container using team templates.
+ * Used by both Rules view (month tasks) and Team view (today/month).
+ * Inserts ISO week separators in month mode.
+ *
+ * LAZY LOADING (month mode only):
+ * Phase 1 — render all group shells (header + empty table) so [data-date]
+ *		   elements exist immediately. scrollToToday() always works.
+ * Phase 2 — IntersectionObserver fills rows when a group scrolls near viewport.
+ * Today scope renders eagerly (small dataset).
+ */
+// Task lookup map for delegated click handlers
+const _taskMap = {};
+let _lazyObs = null;
+
+/** Build row HTML for a task array and register in _taskMap. */
+function _buildRows(tasks) {
+	const rows = [];
+	for (let i = 0; i < tasks.length; i++) {
+		const t = tasks[i];
+		_taskMap[t.id] = t;
+		rows.push(_tplRow({
+			id:		  t.id,
+			user_cls:	t.username ? '' : 'hidden',
+			username:	escHtml(t.username || ''),
+			title:	   escHtml(t.title),
+			coworkers:   (t.coworkers && t.coworkers.length) ? escHtml(t.coworkers.join(', ')) : '',
+			time:		escHtml(t.start_time + '–' + t.end_time),
+			status:	  t.status,
+			status_text: escHtml(t.status_text),
+			del_cls:	 'btn-sm btn-red btn-del' + (t.status == 2 ? ' btn-del-done' : ''),
+			del_dis:	 t.status == 2 ? 'disabled' : '',
+			notes:	   escHtml(t.notes || ''),
+		}));
+	}
+	return rows.join('');
+}
+
+function renderTeamTasks(groupedData, isMonth, containerId) {
+	const container = $(containerId);
+	if (!container) return;
+
+// Tear down previous observer
+	if (_lazyObs) { _lazyObs.disconnect(); _lazyObs = null; }
+
+	const parts = [];
+	let prevWeek = 0;
+	const lazyKeys = []; // date keys needing lazy fill
+
+	for (const [key, tasks] of Object.entries(groupedData)) {
+		if (isMonth) {
+			const wk = isoWeek(key);
+			if (wk !== prevWeek) {
+				prevWeek = wk;
+				parts.push('<div class="week-header">' + escHtml(__('g_week') + ' ' + wk) + '</div>');
+			}
+		}
+
+		if (isMonth) {
+// Phase 1: shell only — empty table body, data-date present
+			lazyKeys.push(key);
+			parts.push(_tplGroup({
+				data_date: 'data-date="' + escHtml(key) + '" data-lazy="1"',
+				header:	escHtml(key),
+				rows:	'',
+			}));
+		} else {
+// Today scope: eager render (few tasks)
+			parts.push(_tplGroup({
+				data_date: '',
+				header:	escHtml(__('start') + ' ' + key),
+				rows:	  _buildRows(tasks),
+			}));
+		}
+	}
+
+	container.innerHTML = parts.join('');
+
+// observe lazy shells
+	if (isMonth && lazyKeys.length) {
+		_lazyObs = new IntersectionObserver(entries => {
+			for (const entry of entries) {
+				if (!entry.isIntersecting) continue;
+				const el = entry.target;
+				const dateKey = el.dataset.date;
+				if (!el.dataset.lazy || !groupedData[dateKey]) continue;
+				const tbl = el.querySelector('.card_body--p10');
+				if (tbl) tbl.innerHTML = _buildRows(groupedData[dateKey]);
+				el.removeAttribute('data-lazy');
+				_lazyObs.unobserve(el);
+			}
+		}, { rootMargin: '200px' }); // pre-fill 200px before visible
+
+		container.querySelectorAll('[data-lazy]').forEach(el => _lazyObs.observe(el));
+	}
+
+// Single delegated listener per container
+	container.onclick = function(e) {
+		if (e.target.closest('.print-link')) return;
+
+		const delBtn = e.target.closest('.btn-del');
+		if (delBtn && !delBtn.disabled) {
+			const row = delBtn.closest('.team-row');
+			if (!row) return;
+			if (!confirm(__('g_del_confirm'))) return;
+			(async () => {
+				const res = await apiCall('tasks/delete', {id: row.dataset.id}, delBtn, __('g_btn_wait'), 'err');
+				if (res && res.msg === 'ok') row.remove();
+			})();
+			return;
+		}
+
+		const row = e.target.closest('.team-row');
+		if (!row || !row.dataset.id) return;
+		const t = _taskMap[row.dataset.id];
+		if (!t) return;
+		const f = $('worker-task-form') || $('manager-task-form');
+		if (!f) return;
+		f.querySelector('[name=id]').value = t.id;
+		f.title.value = t.title;
+		f.task_date.value = t.task_date;
+		f.start_time.value = t.start_time;
+		f.end_time.value = t.end_time;
+		if (f.status) { f.status.value = t.status;
+		if (f.status.tagName === 'SELECT') syncStatusColor(f.status); }
+		if (f.notes) f.notes.value = t.notes || '';
+		if (f.user_id && t.user_id) f.user_id.value = t.user_id;
+		if (f.worker_ids && t.user_id) Array.from(f.worker_ids.options).forEach(opt => opt.selected = (opt.value == t.user_id));
+		$('task-form-top')?.scrollIntoView({behavior: 'smooth'});
+	};
+}
+
+
+// ─── SHARED: Location Details
+
+/** Fill the details form with cached data for the given title. */
+function populateDetails(title) {
+	if (!detailsCache || !detailsCache.length) return;
+	const f = $('details-form');
+	if (!f) return;
+	const match = detailsCache.find(d => d.title === title);
+	if (!match) return; // Prevents clearing form/title while typing new object
+	f.title.value = match.title;
+	f.address.value = match.address || '';
+	f.related_person.value = match.related_person || '';
+	f.description.value = match.description || '';
+}
+
+
+
+
+
+
+/** Upsert a location/object detail record. */
+async function saveDetails(e) {
+	e.preventDefault();
+	const f = e.target, btn = f.querySelector('button');
+	const origText = btn.textContent;
+	const res = await apiCall('details', {
+		title: f.title.value, address: f.address.value,
+		description: f.description.value, related_person: f.related_person.value
+	}, btn, __('g_btn_wait'), __('g_btn_retry'));
+	if (res && res.msg === 'ok') {
+		f.reset();
+		await (CURRENT_SCOPE === 'wobjects' ? refreshObjLocMgmt() : refreshTeamMgmt());
+		btnCooldown(btn, origText, 2000);
+	}
+}
+
+/** Confirm-delete a location detail by title. */
+async function deleteDetails(e, title) {
+	e.stopPropagation();
+	if (!confirm(__('g_del_confirm') + "\n\n" + title)) return;
+	const res = await apiCall('details/delete', {title}, null, '', '');
+	if (res && res.msg === 'ok') await (CURRENT_SCOPE === 'wobjects' ? refreshObjLocMgmt() : refreshTeamMgmt());
+}
+
+
+// ─── VISUAL RULES EDITOR
+// Two-way sync between the Visual Editor UI and the raw textarea.
+// The backend always receives raw text — the visual layer is purely frontend.
+
+let isSyncingRules = false;
+
+/** Parse raw textarea → populate visual rule rows (template clones). */
+function syncTextToVisual() {
+	if (isSyncingRules) return;
+	isSyncingRules = true;
+
+	const ta = $('rules-textarea');
+	const container = $('visual-rules-container');
+	const tpl = $('visual-rule-template');
+	if (!ta || !container || !tpl) { isSyncingRules = false; return; }
+
+	container.innerHTML = '';
+	let rules = [];
+	try { rules = JSON.parse(ta.value || '[]'); } catch(e) { /* invalid JSON, skip */ }
+	if (!Array.isArray(rules)) rules = [];
+
+	rules.forEach(rule => {
+		if (!rule.title) return;
+
+		const clone = tpl.content.cloneNode(true);
+		const row = clone.querySelector('.visual-rule-row');
+
+		row.querySelector('.vr-title').value = rule.title;
+
+// Convert Estonian day letters (ETKNRLP) to numbers (1234567) if present
+		let daysStr = (rule.days || '').toUpperCase()
+			.replace(/E/g, '1').replace(/T/g, '2').replace(/K/g, '3')
+			.replace(/N/g, '4').replace(/R/g, '5').replace(/L/g, '6').replace(/P/g, '7');
+
+		row.querySelectorAll('.vr-days input').forEach(cb => {
+			cb.checked = daysStr.includes(cb.value);
+		});
+
+// Support '*' week toggle vs 1-4
+		const hasAll = (rule.weeks || '').includes('*');
+		row.querySelectorAll('.vr-weeks input').forEach(cb => {
+			cb.checked = cb.value === '*' ? hasAll : (!hasAll && (rule.weeks || '').includes(cb.value));
+		});
+
+		row.querySelector('.vr-start').value = rule.start || '';
+		row.querySelector('.vr-end').value = rule.end || '';
+
+		container.appendChild(clone);
+	});
+
+	isSyncingRules = false;
+	updateWeekHints();
+}
+
+
+/** Update week checkbox labels with date ranges from API full_weeks data. */
+function updateWeekHints() {
+	const fw = rulesData && rulesData.full_weeks;
+	document.querySelectorAll('.vr-weeks').forEach(div => {
+		div.querySelectorAll('label').forEach(lbl => {
+			const cb = lbl.querySelector('input');
+			if (!cb) return;
+			const w = cb.value;
+			const info = fw && fw[w];
+			const txt = info ? w + ' (' + info.from + '\u2013' + info.to + ')' : w;
+			const textNode = lbl.childNodes[lbl.childNodes.length - 1];
+			if (textNode.nodeType === 3) textNode.textContent = txt;
+		});
+	});
+}
+
+
+/** Read visual rule rows → write back JSON to textarea. */
+function syncVisualToText() {
+	let jsonArray = [];
+
+	document.querySelectorAll('.visual-rule-row').forEach(row => {
+		let title = row.querySelector('.vr-title').value.trim();
+		if (!title) return;
+
+		let days = Array.from(row.querySelectorAll('.vr-days input:checked')).map(cb => cb.value).join('');
+		let weeks = Array.from(row.querySelectorAll('.vr-weeks input:checked')).map(cb => cb.value).join('');
+		let start = row.querySelector('.vr-start').value || '';
+		let end = row.querySelector('.vr-end').value || '';
+
+		jsonArray.push({ title, days, weeks, start, end });
+	});
+
+// Update JSON textarea
+	$('rules-textarea').value = JSON.stringify(jsonArray, null, 2);
+}
+
+
+/** Add a new blank rule row to the visual editor. */
+function addVisualRule() {
+	const ta = $('rules-textarea');
+	if (ta) {
+		let rules = [];
+		try { rules = JSON.parse(ta.value || '[]'); } catch(e) { rules = []; }
+		if (!Array.isArray(rules)) rules = [];
+		rules.push({ title: __('New_Task'), days: '1', weeks: '1234', start: '08:00', end: '16:00' });
+		ta.value = JSON.stringify(rules, null, 2);
+		syncTextToVisual();
+
+// Wait for DOM update, then scroll to the new row
+		setTimeout(() => {
+			const bottomAnchor = $('visual_rules_bottom');
+			if (bottomAnchor) {
+				bottomAnchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+			}
+		}, 50);
+	}
+}
+
+
+
+// ─── CSV EXPORT
+
+/** Download current team view data as semicolon-separated CSV (UTF-8 BOM for Excel). */
+function downloadTeamCSV(filename) {
+	if (!teamData || !teamData.grouped) return;
+	let csv = "\uFEFF";
+	for (const [, tasks] of Object.entries(teamData.grouped)) {
+		tasks.forEach(t => {
+			csv += [t.username, t.title, t.task_date, t.start_time, t.end_time, t.status]
+				.map(v => '"' + (v || '').toString().replace(/"/g, '""') + '"')
+				.join(";") + "\r\n";
+		});
+	}
+	const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8;'}));
+	const link = Object.assign(document.createElement('a'), {href: url, download: filename});
+	document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+
+
+
+// ─── AUTO-INIT
+// Fetch i18n first (pre-auth endpoint), then dispatch based on current view.
+
+document.addEventListener('DOMContentLoaded', async () => {
+	if ($('login-form')) return; // Login page — no view init needed
+
+	switch (CURRENT_VIEW) {
+		case 'today':	 await initTodayView(); break;
+		case 'rules':	 await initRulesView(); break;
+		case 'user_info': break; // Static form, no data fetch needed
+		case 'print':	 await initPrintView(); break;
+		case 'team':
+			if (CURRENT_SCOPE === 'baastegijad') await initTeamMgmt();
+			else if (CURRENT_SCOPE === 'wobjects') await initObjLocMgmt();
+			else await initTeamView();
+			break;
+	};
+
+if (typeof _t0 !== 'undefined') {
+	apiCall('debug_log/jstimer',
+	{
+		qs: window.location.search,
+		jstm:(performance.now() - _t0).toFixed(0),
+		fetch: _fetchMs.toFixed(0),
+		render: (performance.now() - _t0 - _fetchMs).toFixed(0)
+	});
+}
+
+});
